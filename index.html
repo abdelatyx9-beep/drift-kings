@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>ملوك التفحيط</title>
+<meta name="theme-color" content="#0c0e13">
+<meta name="description" content="لعبة سباق وتفحيط ثلاثية الأبعاد مجانية للجوال والكمبيوتر.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ملوك التفحيط">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Changa:wght@500;700;800&family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.min.js","three/addons/":"./vendor/jsm/"}}</script>
+</head>
+<body>
+<style>
+:root { --bg: #0c0e13; --panel: rgba(16,18,24,.82); --line: rgba(255,255,255,.12); --txt: #eef1f6; --dim: #9aa3b2; --hot: #ff7a1a; --hot2: #ffb340; --cy: #3fc8ff; --pink: #ff3f8a; --ok: #3fd98a;
+  --fd: "Changa", "IBM Plex Sans Arabic", system-ui, sans-serif; --fb: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif; color-scheme: dark; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--txt); font-family: var(--fb); overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; touch-action: none; overscroll-behavior: none; }
+#app { position: fixed; inset: 0; }
+#cv { display: block; width: 100%; height: 100%; }
+button { font-family: inherit; }
+.btn { font-family: var(--fd); font-weight: 800; font-size: 18px; border: 0; border-radius: 10px; padding: 11px 18px; cursor: pointer; color: #1a0e00; background: linear-gradient(180deg, var(--hot2), var(--hot)); box-shadow: 0 6px 20px rgba(255,122,26,.3); }
+.btn.alt { background: rgba(255,255,255,.06); color: var(--txt); border: 1px solid var(--line); box-shadow: none; }
+.btn.buy { background: linear-gradient(180deg, #7ff0b8, var(--ok)); color: #04140b; box-shadow: 0 6px 20px rgba(63,217,138,.3); }
+.btn:focus-visible, .sw:focus-visible, .tcard:focus-visible, .ctl:focus-visible { outline: 3px solid var(--cy); outline-offset: 2px; }
+/* ---------- screens ---------- */
+.screen { position: absolute; inset: 0; direction: rtl; pointer-events: none; padding: calc(10px + env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px)); box-sizing: border-box; }
+.screen > * { pointer-events: auto; }
+.gtop { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.logo { font-family: var(--fd); font-weight: 800; font-size: 28px; line-height: 1; letter-spacing: .01em; background: linear-gradient(90deg, var(--hot2), var(--pink)); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 10px rgba(255,63,138,.35)); white-space: nowrap; }
+.chips { display: flex; gap: 8px; align-items: center; }
+.coin { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 6px 14px; font-family: var(--fd); font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; }
+.ib { width: 40px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--txt); font-size: 18px; cursor: pointer; }
+.nick { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; color: var(--txt); font-family: var(--fd); font-size: 15px; padding: 7px 10px; width: 130px; }
+.gpanel { position: absolute; top: calc(64px + env(safe-area-inset-top, 0px)); right: max(14px, env(safe-area-inset-right, 0px)); width: min(330px, 40vw); max-height: calc(100dvh - 150px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; display: grid; gap: 9px; box-sizing: border-box; backdrop-filter: blur(6px); }
+.carhead { display: grid; grid-template-columns: 38px 1fr 38px; align-items: center; text-align: center; }
+.carhead h2 { margin: 0; font-family: var(--fd); font-size: 24px; }
+.carhead p { margin: 0; font-size: 12px; color: var(--dim); }
+.arw { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: rgba(255,255,255,.05); color: var(--txt); font-size: 22px; line-height: 1; cursor: pointer; }
+.bars { display: grid; gap: 5px; }
+.bars div { display: grid; grid-template-columns: 54px 1fr; gap: 8px; align-items: center; font-size: 12px; color: var(--dim); }
+.bars b { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
+.bars i { display: block; height: 100%; background: linear-gradient(90deg, var(--cy), var(--hot2)); }
+.gtabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.gtab { display: grid; gap: 6px; }
+.chiprow { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { padding: 5px 9px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--txt); font-family: var(--fb, inherit); font-size: 12px; cursor: pointer; }
+.chip.on { background: var(--hot); color: #1a0e00; border-color: var(--hot); font-weight: 700; }
+.cin { width: 32px; height: 32px; border-radius: 50%; border: 2px dashed rgba(255,255,255,.45); padding: 0; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); cursor: pointer; position: relative; overflow: hidden; }
+.cin input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.rng { width: 100%; accent-color: var(--hot); }
+.numin { width: 64px; background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 8px; color: var(--txt); padding: 4px 8px; font-size: 14px; }
+.gtabs button { padding: 7px 2px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--dim); font-family: var(--fd); font-weight: 700; font-size: 14px; cursor: pointer; }
+.gtabs button.on { color: var(--txt); border-color: var(--hot); background: rgba(255,122,26,.12); }
+.swl { display: flex; flex-wrap: wrap; gap: 7px; } .swt { font-size: 12px; color: var(--dim); margin: 2px 0 0; }
+.sw { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); cursor: pointer; padding: 0; }
+.sw.on { border-color: #fff; box-shadow: 0 0 0 3px var(--hot); }
+.sw.rim { border-radius: 8px; }
+.ups { display: grid; gap: 7px; }
+.ups div { display: grid; grid-template-columns: 62px 1fr auto; gap: 8px; align-items: center; font-size: 13px; }
+.ups em { display: flex; gap: 4px; } .ups em i { flex: 1; height: 8px; border-radius: 2px; background: rgba(255,255,255,.12); } .ups em i.on { background: linear-gradient(90deg, var(--hot), var(--hot2)); }
+.upb { border: 1px solid rgba(63,217,138,.5); background: rgba(63,217,138,.12); color: #bdf7d9; border-radius: 8px; padding: 5px 9px; font-family: var(--fd); font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.upb[disabled] { opacity: .45; cursor: default; }
+.gnote { margin: 0; min-height: 16px; font-size: 12px; color: var(--hot2); text-align: center; }
+.gplay { position: absolute; left: max(18px, env(safe-area-inset-left, 0px)); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 6px; justify-items: stretch; width: min(260px, 34vw); }
+.big { font-size: 30px; padding: 14px 18px; border-radius: 14px; }
+.hint2 { position: absolute; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); right: 50%; transform: translateX(50%); font-size: 11px; color: var(--dim); pointer-events: none; }
+/* track select */
+.tsel { position: absolute; inset: auto 0 0 0; padding: 14px max(14px, env(safe-area-inset-right, 0px)) calc(14px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px)); background: linear-gradient(0deg, rgba(12,14,19,.96) 60%, rgba(12,14,19,0)); display: grid; gap: 10px; }
+.mpick { display: flex; gap: 8px; justify-content: center; }
+.dpick { display: flex; gap: 6px; justify-content: center; align-items: center; font-size: 13px; color: var(--dim); }
+.dpick button { padding: 6px 16px; border-radius: 16px; border: 1px solid var(--line); background: var(--panel); color: var(--txt); font-size: 14px; cursor: pointer; }
+.dpick button.on { border-color: var(--cy); background: rgba(63,200,255,.15); font-weight: 700; }
+.mpick button { padding: 9px 22px; border-radius: 22px; border: 1px solid var(--line); background: var(--panel); color: var(--dim); font-family: var(--fd); font-weight: 800; font-size: 16px; cursor: pointer; }
+.mpick button.on { color: #1a0e00; background: linear-gradient(180deg, var(--hot2), var(--hot)); border-color: transparent; }
+.mdesc { margin: 0; text-align: center; font-size: 13px; color: var(--dim); }
+.tlist { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tcard { display: grid; gap: 3px; text-align: right; padding: 12px; border-radius: 12px; border: 1.5px solid var(--line); cursor: pointer; color: var(--txt); background: linear-gradient(160deg, rgba(90,140,70,.55), rgba(20,30,20,.9)); min-height: 88px; }
+.tcard.night { background: linear-gradient(160deg, rgba(60,50,140,.6), rgba(10,10,30,.92)); }
+.tcard.dusk { background: linear-gradient(160deg, rgba(200,110,60,.55), rgba(40,20,20,.9)); }
+.tcard.on { border-color: var(--hot); box-shadow: 0 0 0 2px var(--hot); }
+.tcard b { font-family: var(--fd); font-size: 18px; } .tcard span { font-size: 12px; color: #d0d6e0; } .tcard i { font-style: normal; color: var(--hot2); letter-spacing: .1em; } .tcard small { font-size: 11px; color: var(--cy); }
+.trow { display: flex; gap: 10px; justify-content: center; } .trow .btn { min-width: 150px; }
+/* results */
+.res { position: absolute; inset: 0; display: grid; place-content: center; background: radial-gradient(ellipse at center, rgba(12,14,19,.75), rgba(12,14,19,.95)); }
+.rcard { width: min(440px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 10px; text-align: center; }
+.rcard h2 { margin: 0; font-family: var(--fd); font-size: 30px; }
+.rcard p { margin: 0; color: var(--dim); font-size: 14px; }
+.rcoins { font-family: var(--fd); font-weight: 800; font-size: 26px; color: var(--hot2); }
+.rtable { display: grid; gap: 3px; max-height: 32vh; overflow-y: auto; }
+.rtable div { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; padding: 5px 10px; border-radius: 8px; background: rgba(255,255,255,.04); font-size: 14px; text-align: right; }
+.rtable div.me { background: rgba(255,122,26,.18); color: #fff; } .rtable b { font-family: var(--fd); } .rtable i { font-style: normal; font-variant-numeric: tabular-nums; color: var(--dim); }
+/* ---------- HUD ---------- */
+.hud { position: absolute; inset: 0; pointer-events: none; direction: rtl; }
+.hud > * { position: absolute; }
+.speedlines { inset: 0; opacity: 0; background: repeating-conic-gradient(from 0deg at 50% 55%, rgba(255,255,255,.0) 0deg 4deg, rgba(255,255,255,.07) 4deg 4.6deg); -webkit-mask: radial-gradient(ellipse at 50% 55%, transparent 30%, #000 75%); mask: radial-gradient(ellipse at 50% 55%, transparent 30%, #000 75%); transition: opacity .2s; }
+.htl { top: calc(10px + env(safe-area-inset-top, 0px)); right: max(14px, env(safe-area-inset-right, 0px)); display: grid; gap: 4px; justify-items: start; }
+.pos { font-family: var(--fd); font-weight: 800; font-size: 46px; line-height: .9; text-shadow: 0 2px 12px rgba(0,0,0,.6); }
+.pos small { font-size: 22px; color: var(--dim); }
+.tag { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 3px 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.tag b { font-family: var(--fd); color: var(--hot2); }
+.htr { top: calc(10px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px)); display: flex; gap: 8px; align-items: flex-start; pointer-events: auto; }
+#mini { width: 120px; height: 120px; background: rgba(10,12,16,.55); border: 1px solid var(--line); border-radius: 12px; }
+.dtot { top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--fd); }
+.dtot span { font-size: 12px; color: var(--dim); display: block; } .dtot b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.dnow { top: 22%; left: 50%; transform: translateX(-50%) scale(calc(1 + var(--k, 0) * .25)); text-align: center; font-family: var(--fd); font-weight: 800; text-shadow: 0 2px 14px rgba(0,0,0,.7); }
+.dnow small { display: block; font-size: 14px; letter-spacing: .3em; color: var(--cy); }
+.dnow b { font-size: 44px; color: #fff; font-variant-numeric: tabular-nums; } .dnow i { font-style: normal; font-size: 30px; color: var(--pink); margin-inline-start: 8px; }
+.pops { top: 34%; left: 50%; transform: translateX(-50%); display: grid; justify-items: center; gap: 4px; }
+.pop { font-family: var(--fd); font-weight: 800; font-size: 28px; color: var(--hot2); text-shadow: 0 2px 10px rgba(0,0,0,.7); animation: pop 1.4s ease-out forwards; }
+.pop.big { font-size: 38px; color: var(--pink); } .pop.bad { color: #ff5a4a; font-size: 22px; }
+@keyframes pop { 0% { transform: scale(1.6); opacity: 0; } 15% { transform: scale(1); opacity: 1; } 80% { opacity: 1; } 100% { transform: translateY(-30px); opacity: 0; } }
+.count { top: 30%; left: 50%; transform: translateX(-50%); font-family: var(--fd); font-weight: 800; font-size: 96px; color: var(--hot2); text-shadow: 0 4px 24px rgba(0,0,0,.6); }
+.hint { top: calc(64px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); background: rgba(255,122,26,.92); color: #1a0e00; font-weight: 700; font-size: 14px; padding: 7px 14px; border-radius: 8px; max-width: 70vw; text-align: center; }
+.dash { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); left: max(24px, env(safe-area-inset-left, 0px)); display: grid; justify-items: center; gap: 4px; width: 170px; }
+body:not(.touch) .dash { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); transform: none; }
+.reset { bottom: calc(40% + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); pointer-events: auto; }
+.wrong { top: 40%; left: 50%; transform: translateX(-50%); font-family: var(--fd); font-weight: 800; font-size: 30px; color: #ff5a4a; text-shadow: 0 2px 12px #000; }
+@media (max-height: 430px) { body.touch .dash { bottom: calc(112px + env(safe-area-inset-bottom, 0px)); } body.touch .gauge { width: 124px; height: 68px; } body.touch .gauge b { font-size: 30px; } body.touch .gauge span { bottom: 30px; } body.touch .nbar { width: 124px; } }
+.gauge { position: relative; width: 150px; height: 82px; }
+.gauge::before { content: ""; position: absolute; inset: 0; border-radius: 150px 150px 0 0; background: conic-gradient(from -90deg at 50% 100%, var(--cy) 0deg, var(--hot2) calc(var(--r, 0) * 140deg), #ff3f3f calc(var(--r, 0) * 180deg), rgba(255,255,255,.1) calc(var(--r, 0) * 180deg) 180deg, transparent 180deg); -webkit-mask: radial-gradient(circle at 50% 100%, transparent 58%, #000 60%); mask: radial-gradient(circle at 50% 100%, transparent 58%, #000 60%); }
+.gauge b { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; font-family: var(--fd); font-weight: 800; font-size: 36px; line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 2px 8px #000; }
+.gauge span { position: absolute; bottom: 36px; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--dim); }
+.gear { font-family: var(--fd); font-size: 14px; color: var(--dim); } .gear b { color: var(--txt); }
+.nbar { width: 150px; height: 7px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; } .nbar i { display: block; height: 100%; background: linear-gradient(90deg, #66ccff, #b46bff); }
+/* touch controls */
+.ctls { inset: 0; pointer-events: none; }
+.ctl { position: absolute; pointer-events: auto; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(16,18,24,.45); color: #fff; font-family: var(--fd); font-weight: 800; touch-action: none; cursor: pointer; display: grid; place-items: center; }
+.ctl.down { background: rgba(255,122,26,.55); border-color: var(--hot2); transform: scale(.96); }
+.cl { left: max(20px, env(safe-area-inset-left, 0px)); bottom: calc(26px + env(safe-area-inset-bottom, 0px)); width: 96px; height: 96px; font-size: 36px; }
+.cr { left: calc(max(20px, env(safe-area-inset-left, 0px)) + 112px); bottom: calc(26px + env(safe-area-inset-bottom, 0px)); width: 96px; height: 96px; font-size: 36px; }
+.cgas { right: max(20px, env(safe-area-inset-right, 0px)); bottom: calc(22px + env(safe-area-inset-bottom, 0px)); width: 104px; height: 104px; font-size: 18px; border-color: rgba(63,217,138,.7); }
+.cbrk { right: calc(max(20px, env(safe-area-inset-right, 0px)) + 118px); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); width: 80px; height: 80px; font-size: 15px; border-color: rgba(255,90,74,.7); }
+.chb { right: calc(max(20px, env(safe-area-inset-right, 0px)) + 14px); bottom: calc(140px + env(safe-area-inset-bottom, 0px)); width: 82px; height: 82px; font-size: 14px; border-color: rgba(255,63,138,.8); }
+.cnit { right: calc(max(20px, env(safe-area-inset-right, 0px)) + 112px); bottom: calc(112px + env(safe-area-inset-bottom, 0px)); width: 66px; height: 66px; font-size: 13px; border-color: rgba(102,204,255,.8); }
+body:not(.touch) .ctls { display: none; }
+body.tilt .cl, body.tilt .cr { display: none; }
+@media (max-height: 430px) { .cl, .cr { width: 84px; height: 84px; } .cr { left: calc(max(20px, env(safe-area-inset-left, 0px)) + 98px); } .cgas { width: 92px; height: 92px; } .chb { bottom: calc(124px + env(safe-area-inset-bottom, 0px)); width: 72px; height: 72px; } .cnit { bottom: calc(100px + env(safe-area-inset-bottom, 0px)); right: calc(max(20px, env(safe-area-inset-right, 0px)) + 100px); } .cbrk { right: calc(max(20px, env(safe-area-inset-right, 0px)) + 104px); width: 72px; height: 72px; } .pos { font-size: 38px; } #mini { width: 100px; height: 100px; } .logo { font-size: 22px; } .gpanel { max-height: calc(100dvh - 76px); } }
+.overlay { position: absolute; inset: 0; display: grid; place-content: center; background: rgba(8,9,12,.7); direction: rtl; z-index: 20; }
+.sbox { width: min(400px, 92vw); background: #14161c; border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 12px; }
+.sbox h2 { margin: 0; font-family: var(--fd); }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; } .seg.two { grid-template-columns: 1fr 1fr; }
+.seg button { padding: 9px 4px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--txt); font-size: 13px; cursor: pointer; }
+.seg button.on { background: var(--hot); color: #1a0e00; border-color: var(--hot); font-weight: 700; }
+.check { display: flex; gap: 10px; align-items: center; } .check input { width: 22px; height: 22px; accent-color: var(--hot); }
+.rotate { position: absolute; inset: 0; display: none; place-content: center; text-align: center; background: var(--bg); font-family: var(--fd); font-size: 22px; z-index: 50; padding: 20px; }
+@media (orientation: portrait) and (pointer: coarse) { body.racing .rotate { display: grid; } }
+@media (orientation: portrait) {
+  .gpanel { top: auto; bottom: calc(104px + env(safe-area-inset-bottom, 0px)); right: 14px; left: 14px; width: auto; max-height: 42dvh; }
+  .gplay { left: 14px; right: 14px; width: auto; }
+  .tlist { grid-template-columns: 1fr; } .hint2 { display: none; } .nick { width: 78px; } .gtop .logo { font-size: 21px; }
+}
+</style>
+<div id="app">
+  <canvas id="cv" aria-label="الحلبة"></canvas>
+
+  <div class="screen" id="garage">
+    <div class="gtop">
+      <div class="logo">ملوك التفحيط</div>
+      <div class="chips"><input class="nick" id="nick" maxlength="12" placeholder="اسمك" aria-label="اسمك"><span class="coin">🪙 <b id="coins">٠</b></span><button class="ib" id="setBtn" type="button" aria-label="الإعدادات">⚙</button></div>
+    </div>
+    <div class="gpanel">
+      <div class="carhead"><button class="arw" id="prevCar" type="button" aria-label="السيارة اللي قبل">‹</button><div><h2 id="carName">صقر</h2><p id="carDesc"></p></div><button class="arw" id="nextCar" type="button" aria-label="السيارة اللي بعد">›</button></div>
+      <div class="bars" id="carBars"></div>
+      <button class="btn" id="carAct" type="button">اختر</button>
+      <div class="gtabs"><button type="button" data-t="paint" class="on">الصبغ</button><button type="button" data-t="rims">الجنوط</button><button type="button" data-t="kit">القطع</button><button type="button" data-t="ups">الترقيات</button></div>
+      <div class="gtab" id="gt-paint"></div><div class="gtab" id="gt-rims" hidden></div><div class="gtab" id="gt-kit" hidden></div>
+      <div class="gtab" id="gt-ups" hidden><div class="ups" id="ups"></div></div>
+      <p class="gnote" id="garNote"></p>
+    </div>
+    <div class="gplay"><button class="btn big" id="playBtn" type="button">العب ▶</button></div>
+    <p class="hint2">اسحب على السيارة عشان تلفها</p>
+  </div>
+
+  <div class="screen" id="tracks" hidden>
+    <div class="gtop"><div class="logo">اختر السباق</div><button class="btn alt" id="backGarage" type="button">رجوع للكراج</button></div>
+    <div class="tsel">
+      <div class="mpick"><button type="button" data-m="race" class="on">🏁 سباق</button><button type="button" data-m="drift">💨 تفحيط</button></div>
+      <p class="mdesc" id="modeDesc"></p>
+      <div class="dpick" id="diffPick"><span>الصعوبة</span><button type="button" data-d="easy">سهل</button><button type="button" data-d="normal">عادي</button><button type="button" data-d="hard">صعب</button></div>
+      <div class="tlist" id="trackList"></div>
+      <div class="trow"><button class="btn big" id="goBtn" type="button">انطلق</button></div>
+    </div>
+  </div>
+
+  <div class="screen res" id="results" hidden>
+    <div class="rcard">
+      <h2 id="resTitle">فزت!</h2><p id="resSub"></p>
+      <div class="rtable" id="resTable"></div>
+      <div class="rcoins">🪙 <span id="resCoins">+٠</span></div>
+      <div class="trow"><button class="btn" id="againBtn" type="button">مرة ثانية</button><button class="btn alt" id="toGarage" type="button">الكراج</button></div>
+    </div>
+  </div>
+
+  <div class="hud" id="hud" hidden>
+    <div class="speedlines" id="speedLines"></div>
+    <div class="htl">
+      <div class="pos" id="posBox"><span id="pos">١</span><small id="posN">/٨</small></div>
+      <span class="tag" id="lapBox">لفة <b id="lap">١/٣</b></span>
+      <span class="tag"><b id="time">٠:٠٠</b></span>
+      <span class="tag" id="bestLap"></span>
+    </div>
+    <div class="htr"><canvas id="mini" width="240" height="240" aria-label="خريطة الحلبة"></canvas><button class="ib" id="pauseBtn" type="button" aria-label="إيقاف مؤقت">❚❚</button><button class="ib" id="camBtn" type="button" aria-label="غيّر الكاميرا">🎥</button></div>
+    <div class="dtot" id="driftBox"><span>نقاط التفحيط</span><b id="driftTotal">٠</b></div>
+    <div class="dnow" id="driftNow" hidden><small>تفحيط</small><b>٠</b><i>×١</i></div>
+    <div class="pops" id="pops"></div>
+    <div class="count" id="count" hidden>٣</div>
+    <div class="hint" id="hint" hidden></div>
+    <div class="wrong" id="wrongWay" hidden>⚠ الاتجاه غلط!</div>
+    <button class="btn reset" id="resetBtn" type="button" hidden>رجّعني للطريق (R)</button>
+    <div class="dash"><div class="gauge" id="rpm"><span>كم/س</span><b id="spd">٠</b></div><div class="gear">الغيار <b id="gear">١</b></div><div class="nbar" aria-label="النيترو"><i id="nitroBar"></i></div></div>
+    <div class="ctls">
+      <button class="ctl cl" data-hold="left" type="button" aria-label="يسار">◀</button>
+      <button class="ctl cr" data-hold="right" type="button" aria-label="يمين">▶</button>
+      <button class="ctl cgas" data-hold="gas" type="button">بنزين</button>
+      <button class="ctl cbrk" data-hold="brake" type="button">فرامل</button>
+      <button class="ctl chb" data-hold="hb" type="button">تفحيط</button>
+      <button class="ctl cnit" data-hold="nitro" type="button">نيترو</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="pauseMenu" hidden><div class="sbox"><h2>إيقاف مؤقت</h2><button class="btn" id="resumeBtn" type="button">كمّل</button><button class="btn alt" id="restartBtn" type="button">من البداية</button><button class="btn alt" id="setPause" type="button">الإعدادات</button><button class="btn alt" id="quitBtn" type="button">اطلع للكراج</button></div></div>
+  <div class="overlay" id="settings" hidden>
+    <div class="sbox">
+      <h2>الإعدادات</h2>
+      <div>الجودة</div><div class="seg"><button type="button" data-q="auto">تلقائي</button><button type="button" data-q="low">منخفضة</button><button type="button" data-q="medium">متوسطة</button><button type="button" data-q="high">عالية</button></div>
+      <div>التوجيه في الجوال</div><div class="seg two"><button type="button" data-ctl="buttons">أزرار</button><button type="button" data-ctl="tilt">إمالة الجوال</button></div>
+      <label class="check"><input type="checkbox" id="soundOn"> الصوت</label>
+      <p class="mdesc">الكمبيوتر: الأسهم أو WASD، Space تفحيط، Shift نيترو، C الكاميرا</p>
+      <button class="btn" id="setDone" type="button">تم</button>
+    </div>
+  </div>
+  <div class="rotate">لف الجوال بالعرض 📱↔️<br>عشان تسوق</div>
+</div>
+
+<script type="module" src="game.js"></script>
+<script>if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));</script>
+</body>
+</html>

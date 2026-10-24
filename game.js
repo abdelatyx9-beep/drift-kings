@@ -677,13 +677,14 @@ function carStep(c, dt) {
   let vf = c.vx * fx + c.vz * fz, vl = -c.vx * fz + c.vz * fx;
   const sp = Math.hypot(vf, vl);
   const q = trackQuery(c.x, c.z, c.idx); c.idx = q.i; c.q = q;
-  c.offroad = Math.abs(q.d) > TR.hw + 0.6;
+  // the white line and the kerbs are part of the road; only real grass/gravel slows you, and gently
+  const offK = clamp((Math.abs(q.d) - (TR.hw + 1.4)) / 2.5, 0, 1); c.offroad = offK > 0.5; c.offK = offK;
   const boost = c.nitroOn && c.nitro > 0;
-  const maxS = st.max * (boost ? 1.16 : 1) * (c.offroad ? 0.62 : 1);
+  const maxS = st.max * (boost ? 1.16 : 1) * (1 - 0.12 * offK);
   // engine, brakes, reverse
   if (c.thr > 0) { const k = clamp(1 - Math.pow(Math.max(0, vf) / maxS, 2), 0, 1); vf += (st.acc * c.thr * (0.35 + 0.65 * k) + (boost ? 9 * st.nitro : 0)) * dt * (vf < -0.5 ? 2.2 : 1); }
   if (c.brk > 0) { if (vf > 0.8) vf -= 30 * c.brk * dt; else vf -= 7 * c.brk * dt * clamp(1 + vf / 13, 0, 1); }
-  vf -= vf * Math.abs(vf) * 0.0009 * dt + vf * (c.offroad ? 0.9 : 0.05) * dt;
+  vf -= vf * Math.abs(vf) * 0.0009 * dt + vf * (0.05 + 0.14 * offK) * dt;
   if (!c.thr && !c.brk) vf -= Math.sign(vf) * Math.min(Math.abs(vf), 1.4 * dt);
   if (vf > maxS) vf = lerp(vf, maxS, 1 - Math.exp(-dt * 1.5));
   if (c.hb) vf -= Math.sign(vf) * Math.min(Math.abs(vf), 5.5 * dt);
@@ -706,7 +707,7 @@ function carStep(c, dt) {
   c.w *= Math.exp(-dt * 0.6);
   // drift assist: past ~45° the car swings back toward where it is going, so slides stay playable
   const over = Math.abs(slip) - 0.72; if (over > 0) c.w += Math.sign(slip) * over * 8 * dt * clamp(sp / 10, 0, 1);
-  const grip = st.grip * (c.offroad ? 0.55 : 1);
+  const grip = st.grip * (1 - 0.25 * offK);
   vl *= Math.exp(-dt * lerp(grip, 0.75, c.loose));
   c.a += c.w * dt;
   // keep the old velocity direction for a moment after turning: that's the slide
@@ -721,7 +722,12 @@ function carStep(c, dt) {
     const n = TR.Nl[q2.i], s = Math.sign(q2.d), pen = Math.abs(q2.d) - lim;
     c.x -= n.x * s * pen; c.z -= n.z * s * pen;
     const vn = (c.vx * n.x + c.vz * n.z) * s;
-    if (vn > 0) { c.vx -= (1.35 * vn) * n.x * s; c.vz -= (1.35 * vn) * n.z * s; c.vx *= 0.9; c.vz *= 0.9; c.w *= 0.5; if (vn > 2.5) onHit(c, vn, n.x * s, n.z * s); }
+    // slide along the wall: lose the push into it, keep most of the speed along it
+    if (vn > 0) { c.vx -= 1.15 * vn * n.x * s; c.vz -= 1.15 * vn * n.z * s; const keep = 1 - Math.min(0.18, vn * 0.012); c.vx *= keep; c.vz *= keep; c.w *= 0.6;
+      // turn the nose along the wall so you scrape and keep going instead of sticking to it
+      const t = TR.T[q2.i], ta = Math.atan2(t.z, t.x); let d1 = ta - c.a; d1 = Math.atan2(Math.sin(d1), Math.cos(d1)); if (Math.abs(d1) > Math.PI / 2) d1 = Math.atan2(Math.sin(d1 + Math.PI), Math.cos(d1 + Math.PI));
+      if (Math.abs(d1) < 1.1) c.a += d1 * 0.3;
+      if (vn > 2.5) onHit(c, vn, n.x * s, n.z * s); }
   }
 }
 // cars bump into each other
@@ -933,7 +939,7 @@ function endRace() {
 }
 function onHit(c, vn, nx, nz) {
   c.hits = (c.hits || 0) + 1;
-  if (c === me) { shake = Math.min(1, vn / 14); buzz(Math.min(120, vn * 8)); breakDrift(); noise(clamp(vn / 25, 0.05, 0.35), 0.25, 900, 120); }
+  if (c === me) { shake = Math.min(1, vn / 14); buzz(Math.min(120, vn * 8)); if (vn > 6) breakDrift(); noise(clamp(vn / 25, 0.05, 0.35), 0.25, 900, 120); }
   if (vn > 4) sparks(c.x - nx * c.def.wid * 0.5, c.z - nz * c.def.wid * 0.5, nx, nz, Math.min(18, vn * 1.5));
 }
 
@@ -949,7 +955,7 @@ function initFx() {
   smg.setAttribute("aColor", new THREE.Float32BufferAttribute(new Float32Array(SMOKE * 3).fill(1), 3));
   smokePts = new THREE.Points(smg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { uScale: { value: 400 }, fogColor: { value: new THREE.Color() }, fogFar: { value: 600 } },
     vertexShader: "attribute float aSize; attribute float aAlpha; attribute vec3 aColor; uniform float uScale; varying float vA; varying vec3 vC; varying float vD; void main(){ vec4 mv = modelViewMatrix*vec4(position,1.); vD = -mv.z; gl_PointSize = aSize*uScale/max(0.5,-mv.z); vA = aAlpha; vC = aColor; gl_Position = projectionMatrix*mv; }",
-    fragmentShader: "varying float vA; varying vec3 vC; varying float vD; uniform vec3 fogColor; uniform float fogFar; void main(){ vec2 q = gl_PointCoord*2.-1.; float d = dot(q,q); if (d > 1.) discard; float a = (1.-d)*(1.-d)*vA; vec3 c = mix(vC, fogColor, clamp(vD/fogFar,0.,1.)); gl_FragColor = vec4(c, a); }" }));
+    fragmentShader: "varying float vA; varying vec3 vC; varying float vD; uniform vec3 fogColor; uniform float fogFar; void main(){ vec2 q = gl_PointCoord*2.-1.; float d = dot(q,q); if (d > 1.) discard; float a = (1.-d)*(1.-d)*vA*smoothstep(2.5, 9., vD); vec3 c = mix(vC, fogColor, clamp(vD/fogFar,0.,1.)); gl_FragColor = vec4(c, a); }" }));
   smokePts.frustumCulled = false; world.add(smokePts);
   for (let i = 0; i < SMOKE; i++) smoke.push({ x: 0, y: -999, z: 0, vx: 0, vy: 0, vz: 0, t: 0, max: 1, big: false, r: 1, g: 1, b: 1 });
   const g = new THREE.PlaneGeometry(0.22, 0.6); g.rotateX(-Math.PI / 2);
@@ -962,7 +968,7 @@ function initFx() {
 const _col = new THREE.Color();
 function puffAt(x, y, z, big, col) {
   const p = smoke[smokeN]; smokeN = (smokeN + 1) % SMOKE;
-  p.t = p.max = big ? 1.7 : 1.0; p.x = x; p.y = y; p.z = z; p.big = big; _col.set(col || 0xe6e6e6); p.r = _col.r; p.g = _col.g; p.b = _col.b;
+  p.t = p.max = big ? 0.8 : 0.5; p.x = x; p.y = y; p.z = z; p.big = big; _col.set(col || 0xe6e6e6); p.r = _col.r; p.g = _col.g; p.b = _col.b;
   p.vx = (Math.random() - 0.5) * 1.5; p.vy = 0.6 + Math.random() * 0.8; p.vz = (Math.random() - 0.5) * 1.5;
 }
 function sparks(x, z, nx, nz, n) { for (let i = 0; i < n; i++) { const s = sparkV[sparkN]; sparkN = (sparkN + 1) % SPARK; s.x = x; s.y = 0.4; s.z = z; s.vx = nx * 4 + (Math.random() - 0.5) * 6; s.vz = nz * 4 + (Math.random() - 0.5) * 6; s.vy = 2 + Math.random() * 3; s.t = 0.4 + Math.random() * 0.3; } }
@@ -977,7 +983,7 @@ function carFx(c, dt) {
     for (const s of [1, -1]) {
       const wx = c.x - ca * G.wx + -sa * s * G.wz, wz = c.z - sa * G.wx + ca * s * G.wz;
       if (skidAcc > 0.5) { _q.setFromAxisAngle(_up, -c.a + Math.PI / 2); _m4.compose(_v.set(wx, 0.04, wz), _q, _one); skid.setMatrixAt(skidN, _m4); skidN = (skidN + 1) % SKID; skid.instanceMatrix.needsUpdate = true; }
-      if (Math.random() < (c.player ? 0.6 : 0.3) * dt * 60) puffAt(wx, 0.35, wz, ang > 0.5 || burn, c.offroad ? 0xc9b48a : (c.mesh.userData.look.smoke || 0xe6e6e6));
+      if (Math.random() < (c.player ? 0.42 : 0.25) * dt * 60) puffAt(wx, 0.35, wz, ang > 0.5 || burn, c.offroad ? 0xc9b48a : (c.mesh.userData.look.smoke || 0xe6e6e6));
     }
     if (skidAcc > 0.5) skidAcc = 0;
   }
@@ -988,7 +994,7 @@ function fxTick(dt) {
   const sp = smokePts.geometry.attributes.position, ss = smokePts.geometry.attributes.aSize, sa = smokePts.geometry.attributes.aAlpha, sc2 = smokePts.geometry.attributes.aColor;
   for (let i = 0; i < SMOKE; i++) {
     const p = smoke[i];
-    if (p.t > 0) { p.t -= dt; const k = 1 - p.t / p.max; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; ss.array[i] = (p.big ? 2.4 : 1.3) + k * (p.big ? 5.5 : 3.2); sa.array[i] = Math.max(0, 1 - k) * (p.big ? 0.6 : 0.42); }
+    if (p.t > 0) { p.t -= dt; const k = 1 - p.t / p.max; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; ss.array[i] = (p.big ? 1.8 : 1.1) + k * (p.big ? 3.2 : 2.0); sa.array[i] = Math.pow(Math.max(0, 1 - k), 1.6) * (p.big ? 0.34 : 0.24); }
     else sa.array[i] = 0;
     sp.setXYZ(i, p.x, p.y, p.z); sc2.setXYZ(i, p.r, p.g, p.b);
   }
@@ -1049,22 +1055,22 @@ function updateCamera(dt) {
   // follow a mix of where the car points and where it is going, so drifts look wide
   const velA = sp > 4 ? Math.atan2(c.vz, c.vx) : c.a; let mix = c.a; let dd = velA - c.a; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); mix = c.a + dd * 0.45;
   let da = mix - camA; da = Math.atan2(Math.sin(da), Math.cos(da)); camA += da * (1 - Math.exp(-dt * 5));
-  const camMode = SETTINGS.cam % 3, dist = camMode === 1 ? 9.5 : 6.3, h = camMode === 1 ? 3.6 : 2.15;
+  const camMode = SETTINGS.cam % 3, dist = camMode === 1 ? 8.5 : 4.9, h = camMode === 1 ? 3.2 : 1.7;
   if (camMode === 2) { // bonnet camera
     camPos.set(c.x + Math.cos(c.a) * 0.4, 1.15, c.z + Math.sin(c.a) * 0.4); camLook.set(c.x + Math.cos(c.a) * 20, 1.0, c.z + Math.sin(c.a) * 20);
     camera.position.copy(camPos);
   } else {
-    const back = dist + sp * 0.03;
+    const back = dist + sp * 0.012;
     const tx = c.x - Math.cos(camA) * back, tz = c.z - Math.sin(camA) * back;
-    camPos.set(tx, h + sp * 0.008, tz);
-    camera.position.lerp(camPos, 1 - Math.exp(-dt * 12));
-    camLook.set(c.x + Math.cos(camA) * 3, 0.9, c.z + Math.sin(camA) * 3);
+    camPos.set(tx, h + sp * 0.006, tz);
+    camera.position.lerp(camPos, 1 - Math.exp(-dt * 28)); // stays tight behind the car, even at full speed
+    camLook.set(c.x + Math.cos(camA) * 3.2, 1.0, c.z + Math.sin(camA) * 3.2);
   }
   shake = Math.max(0, shake - dt * 2.5);
   camera.position.x += (Math.random() - 0.5) * shake * 0.3; camera.position.y += (Math.random() - 0.5) * shake * 0.2;
   camera.lookAt(camLook);
   const boost = c.nitroOn && c.nitro > 0;
-  camera.fov = lerp(camera.fov, 60 + Math.min(16, sp * 0.22) + (boost ? 8 : 0), 1 - Math.exp(-dt * 4)); camera.updateProjectionMatrix();
+  camera.fov = lerp(camera.fov, 55 + Math.min(8, sp * 0.14) + (boost ? 6 : 0), 1 - Math.exp(-dt * 4)); camera.updateProjectionMatrix();
   sun.position.set(c.x + 40, 90, c.z + 30); sun.target.position.set(c.x, 0, c.z);
   headLight.position.set(c.x + Math.cos(c.a) * 1.5, 1.2, c.z + Math.sin(c.a) * 1.5); headLight.target.position.set(c.x + Math.cos(c.a) * 30, 0, c.z + Math.sin(c.a) * 30);
 }
@@ -1142,13 +1148,21 @@ const input = (() => {
     if (k === " " || k.startsWith("arrow")) e.preventDefault();
   });
   window.addEventListener("keyup", (e) => { keys[e.key.toLowerCase()] = false; });
-  // touch buttons: hold to press
-  document.querySelectorAll("[data-hold]").forEach((b) => {
-    const k = b.dataset.hold;
-    const on = (e) => { e.preventDefault(); held[k] = true; b.classList.add("down"); audio(); try { b.setPointerCapture(e.pointerId); } catch (er) {} };
-    const off = () => { held[k] = false; b.classList.remove("down"); };
-    b.addEventListener("pointerdown", on); b.addEventListener("pointerup", off); b.addEventListener("pointercancel", off); b.addEventListener("lostpointercapture", off);
-  });
+  // touch buttons: every finger is tracked on its own, a finger can slide from one button to the next,
+  // and the hit area is a little bigger than the drawn circle so quick taps never miss
+  const ctlEls = [...document.querySelectorAll("[data-hold]")], ptrs = new Map();
+  let rects = null; const measure = () => { rects = ctlEls.map((b) => [b.dataset.hold, b.getBoundingClientRect()]); };
+  const hitKey = (x, y) => { let best = null, bd = 1e9; for (const [k, r] of rects) { if (!r.width) continue; const cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2, d = Math.hypot(x - cx, y - cy), rad = r.width / 2 + 18; if (d < rad && d < bd) { bd = d; best = k; } } return best; };
+  const sync = () => { for (const k in held) held[k] = false; for (const k of ptrs.values()) held[k] = true; for (const b of ctlEls) b.classList.toggle("down", !!held[b.dataset.hold]); };
+  window.addEventListener("pointerdown", (e) => { if (mode !== "race" || paused || e.pointerType === "mouse") return; measure(); const k = hitKey(e.clientX, e.clientY); if (!k) return; e.preventDefault(); ptrs.set(e.pointerId, k); sync(); audio(); }, { passive: false });
+  window.addEventListener("pointermove", (e) => { if (!ptrs.has(e.pointerId)) return; const k = hitKey(e.clientX, e.clientY); if (k && k !== ptrs.get(e.pointerId)) { ptrs.set(e.pointerId, k); sync(); } });
+  const lift = (e) => { if (ptrs.delete(e.pointerId)) sync(); };
+  for (const t of ["pointerup", "pointercancel"]) window.addEventListener(t, lift);
+  // mouse clicks on the buttons (desktop testing)
+  for (const b of ctlEls) { b.addEventListener("mousedown", () => { ptrs.set("m", b.dataset.hold); sync(); }); }
+  window.addEventListener("mouseup", () => { if (ptrs.delete("m")) sync(); });
+  window.addEventListener("blur", () => { ptrs.clear(); sync(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { ptrs.clear(); sync(); } });
   let tilt = 0; window.addEventListener("deviceorientation", (e) => { const land = Math.abs(window.orientation || (screen.orientation && screen.orientation.angle) || 0) === 90; const v = land ? (e.beta || 0) * Math.sign((screen.orientation && screen.orientation.angle) === 270 || window.orientation === -90 ? -1 : 1) : (e.gamma || 0); tilt = clamp(v / 22, -1, 1); });
   let steerV = 0;
   return {
@@ -1157,7 +1171,8 @@ const input = (() => {
       let target = (R ? 1 : 0) - (L ? 1 : 0);
       if (SETTINGS.ctl === "tilt" && IS_TOUCH) target = Math.abs(tilt) < 0.06 ? 0 : tilt;
       // digital steering eases in so it feels like a wheel
-      const rate = target === 0 ? 7 : Math.sign(target) !== Math.sign(steerV) ? 9 : 4.2;
+      const touchK = IS_TOUCH ? 1.9 : 1; // fingers want a sharper response than a keyboard
+      const rate = (target === 0 ? 8 : Math.sign(target) !== Math.sign(steerV) ? 11 : 5.5) * touchK;
       steerV += clamp(target - steerV, -rate * dt, rate * dt);
       if (Math.abs(target - steerV) < 0.02) steerV = target;
       c.steer = steerV;
@@ -1338,6 +1353,8 @@ async function goFullscreen() {
   try { if (!document.fullscreenElement && document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen({ navigationUI: "hide" }); } catch (e) {}
   try { await screen.orientation?.lock?.("landscape"); } catch (e) {}
 }
+// on phones: the first touch anywhere goes full screen and turns the game sideways straight away
+if (IS_TOUCH) { const first = () => { goFullscreen(); }; window.addEventListener("pointerup", first, { once: true }); document.addEventListener("fullscreenchange", () => { if (document.fullscreenElement) { try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} } }); }
 document.body.classList.toggle("touch", IS_TOUCH); document.body.classList.toggle("tilt", SETTINGS.ctl === "tilt");
 // ---------------- boot ----------------
 applyQuality(); buildGarage(); gar.sel = Math.max(0, CARS.findIndex((c) => c.id === PROF.car)); showScreen("garage"); garageUi();

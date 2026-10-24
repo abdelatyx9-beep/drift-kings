@@ -135,7 +135,9 @@ body:not(.touch) .dash { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); 
 /* touch controls */
 .ctls { inset: 0; pointer-events: none; }
 .ctl { position: absolute; pointer-events: auto; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(16,18,24,.45); color: #fff; font-family: var(--fd); font-weight: 800; touch-action: none; cursor: pointer; display: grid; place-items: center; }
-.ctl.down { background: rgba(255,122,26,.55); border-color: var(--hot2); transform: scale(.96); }
+.ctl.down { background: rgba(255,122,26,.55); border-color: var(--hot2); }
+.ctl { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+body.racing, .hud { touch-action: none; overscroll-behavior: none; }
 .cl { left: max(20px, env(safe-area-inset-left, 0px)); bottom: calc(26px + env(safe-area-inset-bottom, 0px)); width: 96px; height: 96px; font-size: 36px; }
 .cr { left: calc(max(20px, env(safe-area-inset-left, 0px)) + 112px); bottom: calc(26px + env(safe-area-inset-bottom, 0px)); width: 96px; height: 96px; font-size: 36px; }
 .cgas { right: max(20px, env(safe-area-inset-right, 0px)); bottom: calc(22px + env(safe-area-inset-bottom, 0px)); width: 104px; height: 104px; font-size: 18px; border-color: rgba(63,217,138,.7); }

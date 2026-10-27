@@ -929,7 +929,7 @@ function endRace() {
       if (sc > PROF.bestDrift) { PROF.bestDrift = sc; sub += " – رقم قياسي جديد!"; }
     }
     PROF.stars[def.id + gameMode] = Math.max(PROF.stars[def.id + gameMode] || 0, stars);
-    PROF.coins += coins; saveProf();
+    PROF.coins += coins; saveProf(); setTimeout(() => offerDouble(coins), 600);
     $("resTitle").textContent = title; $("resSub").textContent = sub; $("resCoins").textContent = "+" + ar(coins);
     const tb = $("resTable"); tb.innerHTML = "";
     if (gameMode === "race") { const order = cars.slice().sort((a, b) => (a.finished && b.finished ? a.finishT - b.finishT : b.dist - a.dist)); order.forEach((c, i) => { const r = document.createElement("div"); if (c === me) r.className = "me"; const a = document.createElement("b"), n = document.createElement("span"), t = document.createElement("i"); a.textContent = ar(i + 1); n.textContent = c.name; t.textContent = c.finished ? fmtT(c.finishT) : "—"; r.append(a, n, t); tb.append(r); }); }
@@ -1327,8 +1327,8 @@ document.querySelectorAll("#diffPick button").forEach((b) => b.addEventListener(
 $("playBtn").addEventListener("click", () => { PROF.car = CARS[gar.sel].id; saveProf(); audio(); showScreen("tracks"); tracksUi(); });
 $("backGarage").addEventListener("click", () => { showScreen("garage"); garageUi(); });
 $("goBtn").addEventListener("click", () => { audio(); goFullscreen(); startRace(pickMode, pickTrack); });
-$("againBtn").addEventListener("click", () => startRace(gameMode, trackIdx));
-$("toGarage").addEventListener("click", () => { showScreen("garage"); garageUi(); $("hud").hidden = true; });
+$("againBtn").addEventListener("click", () => { $("adDouble").hidden = true; nextAd(); startRace(gameMode, trackIdx); });
+$("toGarage").addEventListener("click", () => { $("adDouble").hidden = true; setTimeout(offerCoins, 800); showScreen("garage"); garageUi(); $("hud").hidden = true; });
 $("pauseBtn").addEventListener("click", togglePause);
 $("resumeBtn").addEventListener("click", togglePause);
 $("restartBtn").addEventListener("click", () => { paused = false; $("pauseMenu").hidden = true; startRace(gameMode, trackIdx); });
@@ -1358,5 +1358,50 @@ if (IS_TOUCH) { const first = () => { goFullscreen(); }; window.addEventListener
 document.body.classList.toggle("touch", IS_TOUCH); document.body.classList.toggle("tilt", SETTINGS.ctl === "tilt");
 // ---------------- boot ----------------
 applyQuality(); buildGarage(); gar.sel = Math.max(0, CARS.findIndex((c) => c.id === PROF.car)); showScreen("garage"); garageUi();
-requestAnimationFrame(frame);
+requestAnimationFrame(frame); setTimeout(offerCoins, 2500);
 window.__dk = { get me() { return me; }, get cars() { return cars; }, get tr() { return TR; }, get drift() { return drift; }, start: startRace, get info() { return renderer.info.render; }, get adapt() { return ADAPT; }, sim(n) { for (let i = 0; i < n; i++) { for (const c of cars) { c.px = c.x; c.pz = c.z; c.pa = c.a; c.pspin = c.spin; } update(STEP); } }, set hits(v) {}, };
+
+// ---------------- rewarded ads (Google H5 Games Ads) ----------------
+// Off until a publisher id is put in <meta name="ads-client">. When on: after a race you can double the
+// prize by watching an ad, and in the garage you can watch one for coins. Nothing is ever forced.
+const ADS = { client: (document.querySelector('meta[name="ads-client"]') || {}).content || "", ready: false, reward: null, lastCoin: 0, busy: false };
+function adsInit() {
+  if (!ADS.client || ADS.ready) return;
+  ADS.ready = true;
+  window.adsbygoogle = window.adsbygoogle || [];
+  window.adBreak = window.adConfig = function (o) { window.adsbygoogle.push(o); };
+  const s = document.createElement("script"); s.async = true; s.crossOrigin = "anonymous";
+  s.src = "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=" + encodeURIComponent(ADS.client);
+  s.setAttribute("data-ad-client", ADS.client); s.setAttribute("data-ad-frequency-hint", "45s");
+  if (/[?&]adtest=1/.test(location.search)) s.setAttribute("data-adbreak-test", "on");
+  document.head.append(s);
+  window.adConfig({ preloadAdBreaks: "on", sound: "on" });
+}
+const adMute = () => { try { engineStop(); if (ac) ac.suspend(); } catch (e) {} };
+const adUnmute = () => { try { if (ac) ac.resume(); } catch (e) {} };
+// ask Google for a rewarded ad; `ok` runs only if one is available, `give` only if it was watched to the end
+function rewardAd(name, ok, give) {
+  if (!ADS.ready || ADS.busy) return;
+  ADS.busy = true;
+  window.adBreak({ type: "reward", name, beforeAd: adMute, afterAd: adUnmute,
+    beforeReward: (show) => { ADS.busy = false; ok(() => { ADS.busy = true; show(); }); },
+    adViewed: () => { give(); }, adDismissed: () => {},
+    adBreakDone: () => { ADS.busy = false; } });
+}
+// a short break between races (Google decides how often; skipped if none is ready)
+function nextAd() { if (ADS.ready) window.adBreak({ type: "next", name: "after-race", beforeAd: adMute, afterAd: adUnmute }); }
+function offerDouble(coins) {
+  const b = $("adDouble"); b.hidden = true;
+  if (!ADS.ready || coins <= 0) return;
+  rewardAd("double-prize", (show) => { b.hidden = false; b.onclick = () => { b.hidden = true; show(); }; }, () => {
+    PROF.coins += coins; saveProf(); $("resCoins").textContent = "+" + ar(coins * 2); tone(880, 0.12, "triangle", 0.06); setTimeout(() => tone(1320, 0.2, "triangle", 0.06), 140);
+  });
+}
+function offerCoins() {
+  const b = $("adCoins"); b.hidden = true;
+  if (!ADS.ready || Date.now() - ADS.lastCoin < 180000) return;
+  rewardAd("free-coins", (show) => { b.hidden = false; b.onclick = () => { b.hidden = true; show(); }; }, () => {
+    ADS.lastCoin = Date.now(); PROF.coins += 300; saveProf(); $("coins").textContent = ar(PROF.coins); tone(880, 0.12, "triangle", 0.06);
+  });
+}
+adsInit();

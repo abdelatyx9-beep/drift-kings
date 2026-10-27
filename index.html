@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>ملوك التفحيط</title>
 <meta name="theme-color" content="#0c0e13">
+<meta name="ads-client" content="">
 <meta name="description" content="لعبة سباق وتفحيط ثلاثية الأبعاد مجانية للجوال والكمبيوتر.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
@@ -95,6 +96,8 @@ button { font-family: inherit; }
 .rcard { width: min(440px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 10px; text-align: center; }
 .rcard h2 { margin: 0; font-family: var(--fd); font-size: 30px; }
 .rcard p { margin: 0; color: var(--dim); font-size: 14px; }
+.adbtn { background: linear-gradient(180deg, #3fd98a, #1fa864); color: #04210f; }
+.adcoin { width: auto; padding: 0 10px; font-family: var(--fd); font-weight: 800; font-size: 14px; color: #bdf7d9; border-color: rgba(63,217,138,.6); }
 .rcoins { font-family: var(--fd); font-weight: 800; font-size: 26px; color: var(--hot2); }
 .rtable { display: grid; gap: 3px; max-height: 32vh; overflow-y: auto; }
 .rtable div { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; padding: 5px 10px; border-radius: 8px; background: rgba(255,255,255,.04); font-size: 14px; text-align: right; }
@@ -168,7 +171,7 @@ body.tilt .cl, body.tilt .cr { display: none; }
   <div class="screen" id="garage">
     <div class="gtop">
       <div class="logo">ملوك التفحيط</div>
-      <div class="chips"><input class="nick" id="nick" maxlength="12" placeholder="اسمك" aria-label="اسمك"><span class="coin">🪙 <b id="coins">٠</b></span><button class="ib" id="setBtn" type="button" aria-label="الإعدادات">⚙</button></div>
+      <div class="chips"><input class="nick" id="nick" maxlength="12" placeholder="اسمك" aria-label="اسمك"><span class="coin">🪙 <b id="coins">٠</b></span><button class="ib adcoin" id="adCoins" type="button" hidden aria-label="شاهد إعلان واحصل على ٣٠٠ عملة">🎬 +٣٠٠</button><button class="ib" id="setBtn" type="button" aria-label="الإعدادات">⚙</button></div>
     </div>
     <div class="gpanel">
       <div class="carhead"><button class="arw" id="prevCar" type="button" aria-label="السيارة اللي قبل">‹</button><div><h2 id="carName">صقر</h2><p id="carDesc"></p></div><button class="arw" id="nextCar" type="button" aria-label="السيارة اللي بعد">›</button></div>
@@ -199,6 +202,7 @@ body.tilt .cl, body.tilt .cr { display: none; }
       <h2 id="resTitle">فزت!</h2><p id="resSub"></p>
       <div class="rtable" id="resTable"></div>
       <div class="rcoins">🪙 <span id="resCoins">+٠</span></div>
+      <button class="btn adbtn" id="adDouble" type="button" hidden>🎬 شاهد إعلان وضاعف الجائزة</button>
       <div class="trow"><button class="btn" id="againBtn" type="button">مرة ثانية</button><button class="btn alt" id="toGarage" type="button">الكراج</button></div>
     </div>
   </div>

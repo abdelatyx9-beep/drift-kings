@@ -16,29 +16,6 @@
     "entertainment"
   ],
   "prefer_related_applications": false,
-  "screenshots": [
-    {
-      "src": "store/shot-1.png",
-      "sizes": "1920x1080",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "سباق في حلبة الصقر"
-    },
-    {
-      "src": "store/shot-2.png",
-      "sizes": "1920x1080",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "الكراج وتخصيص السيارة"
-    },
-    {
-      "src": "store/shot-3.png",
-      "sizes": "1920x1080",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "تفحيط في طريق الجبل"
-    }
-  ],
   "icons": [
     {
       "src": "icons/icon-192.png",

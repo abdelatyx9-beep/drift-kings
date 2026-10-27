@@ -6,6 +6,8 @@
 <title>ملوك التفحيط</title>
 <meta name="theme-color" content="#0c0e13">
 <meta name="ads-client" content="">
+<meta name="dk-sb-url" content="">
+<meta name="dk-sb-key" content="">
 <meta name="description" content="لعبة سباق وتفحيط ثلاثية الأبعاد مجانية للجوال والكمبيوتر.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
@@ -98,6 +100,24 @@ button { font-family: inherit; }
 .rcard p { margin: 0; color: var(--dim); font-size: 14px; }
 .adbtn { background: linear-gradient(180deg, #3fd98a, #1fa864); color: #04210f; }
 .adcoin { width: auto; padding: 0 10px; font-family: var(--fd); font-weight: 800; font-size: 14px; color: #bdf7d9; border-color: rgba(63,217,138,.6); }
+.chalb { position: relative; } .chalb i { position: absolute; top: -6px; left: -6px; min-width: 18px; height: 18px; border-radius: 9px; background: #ff3f5f; color: #fff; font-style: normal; font-size: 11px; font-weight: 800; display: grid; place-items: center; padding: 0 4px; }
+.cbox { width: min(520px, 94vw); max-height: 86dvh; overflow-y: auto; box-sizing: border-box; }
+.chead { display: flex; justify-content: space-between; align-items: center; } .chead h2 { margin: 0; }
+.ctabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+.ctabs button { padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--dim); font-family: var(--fd); font-weight: 700; font-size: 15px; cursor: pointer; }
+.ctabs button.on { color: var(--txt); border-color: var(--hot); background: rgba(255,122,26,.12); }
+#chalBody { display: grid; gap: 8px; }
+.crow { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.03); }
+.crow b { display: block; font-size: 14px; } .crow small { color: var(--dim); font-size: 12px; }
+.crow.ready { border-color: rgba(63,217,138,.7); background: rgba(63,217,138,.08); } .crow.claimed { opacity: .55; }
+.cbtn { border: 1px solid rgba(242,165,65,.6); background: rgba(242,165,65,.12); color: #ffd7a8; border-radius: 8px; padding: 6px 10px; font-family: var(--fd); font-weight: 700; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.crow.ready .cbtn { background: linear-gradient(180deg, #3fd98a, #1fa864); color: #04210f; border-color: transparent; } .cbtn[disabled] { cursor: default; }
+.cnote { margin: 4px 0 0; font-size: 12px; color: var(--dim); text-align: center; }
+.lbctl { display: grid; gap: 6px; } .lblist { display: grid; gap: 4px; }
+.lbrow { display: grid; grid-template-columns: 34px 1fr auto auto; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,.04); font-size: 14px; }
+.lbrow b { text-align: center; } .lbrow small { color: var(--dim); font-size: 11px; } .lbrow i { font-style: normal; font-family: var(--fd); font-weight: 700; font-variant-numeric: tabular-nums; }
+.lbrow.me { background: rgba(255,122,26,.18); outline: 1px solid var(--hot); }
+.rrank { margin: 2px 0 0; font-family: var(--fd); font-weight: 700; color: #ffd7a8; }
 .rcoins { font-family: var(--fd); font-weight: 800; font-size: 26px; color: var(--hot2); }
 .rtable { display: grid; gap: 3px; max-height: 32vh; overflow-y: auto; }
 .rtable div { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; padding: 5px 10px; border-radius: 8px; background: rgba(255,255,255,.04); font-size: 14px; text-align: right; }
@@ -171,7 +191,7 @@ body.tilt .cl, body.tilt .cr { display: none; }
   <div class="screen" id="garage">
     <div class="gtop">
       <div class="logo">ملوك التفحيط</div>
-      <div class="chips"><input class="nick" id="nick" maxlength="12" placeholder="اسمك" aria-label="اسمك"><span class="coin">🪙 <b id="coins">٠</b></span><button class="ib adcoin" id="adCoins" type="button" hidden aria-label="شاهد إعلان واحصل على ٣٠٠ عملة">🎬 +٣٠٠</button><button class="ib" id="setBtn" type="button" aria-label="الإعدادات">⚙</button></div>
+      <div class="chips"><input class="nick" id="nick" maxlength="12" placeholder="اسمك" aria-label="اسمك"><span class="coin">🪙 <b id="coins">٠</b></span><button class="ib chalb" id="chalBtn" type="button" aria-label="التحديات ولوحة الصدارة">🏆<i id="chalBadge" hidden>١</i></button><button class="ib adcoin" id="adCoins" type="button" hidden aria-label="شاهد إعلان واحصل على ٣٠٠ عملة">🎬 +٣٠٠</button><button class="ib" id="setBtn" type="button" aria-label="الإعدادات">⚙</button></div>
     </div>
     <div class="gpanel">
       <div class="carhead"><button class="arw" id="prevCar" type="button" aria-label="السيارة اللي قبل">‹</button><div><h2 id="carName">صقر</h2><p id="carDesc"></p></div><button class="arw" id="nextCar" type="button" aria-label="السيارة اللي بعد">›</button></div>
@@ -202,6 +222,7 @@ body.tilt .cl, body.tilt .cr { display: none; }
       <h2 id="resTitle">فزت!</h2><p id="resSub"></p>
       <div class="rtable" id="resTable"></div>
       <div class="rcoins">🪙 <span id="resCoins">+٠</span></div>
+      <p class="rrank" id="resRank" hidden></p>
       <button class="btn adbtn" id="adDouble" type="button" hidden>🎬 شاهد إعلان وضاعف الجائزة</button>
       <div class="trow"><button class="btn" id="againBtn" type="button">مرة ثانية</button><button class="btn alt" id="toGarage" type="button">الكراج</button></div>
     </div>
@@ -234,6 +255,13 @@ body.tilt .cl, body.tilt .cr { display: none; }
     </div>
   </div>
 
+  <div class="overlay" id="chal" hidden>
+    <div class="sbox cbox">
+      <div class="chead"><h2>التحديات والصدارة 🏆</h2><button class="ib" id="chalClose" type="button" aria-label="إغلاق">✕</button></div>
+      <div class="ctabs"><button type="button" data-c="daily" class="on">اليوم</button><button type="button" data-c="weekly">الأسبوع</button><button type="button" data-c="board">الصدارة</button></div>
+      <div id="chalBody"></div>
+    </div>
+  </div>
   <div class="overlay" id="pauseMenu" hidden><div class="sbox"><h2>إيقاف مؤقت</h2><button class="btn" id="resumeBtn" type="button">كمّل</button><button class="btn alt" id="restartBtn" type="button">من البداية</button><button class="btn alt" id="setPause" type="button">الإعدادات</button><button class="btn alt" id="quitBtn" type="button">اطلع للكراج</button></div></div>
   <div class="overlay" id="settings" hidden>
     <div class="sbox">

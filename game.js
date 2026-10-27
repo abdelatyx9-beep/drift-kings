@@ -854,7 +854,7 @@ function aiLook(c, R) {
 }
 
 // ---------------- game state ----------------
-let mode = "garage", gameMode = "race", trackIdx = 0, world = null, cars = [], me = null, raceT = 0, countdown = 0, ended = false, paused = false;
+let nitroT = 0, mode = "garage", gameMode = "race", trackIdx = 0, world = null, cars = [], me = null, raceT = 0, countdown = 0, ended = false, paused = false;
 const AI_PACE = { barq: 0.92, saqr: 0.98, asifa: 1, theeb: 1, nimr: 1, hamour: 1 };
 const AI_NAMES = ["فهد", "سلطان", "ريم", "ماجد", "نورة", "خالد", "عزوز", "بندر"];
 const DRIFT_TIME = 120;
@@ -901,7 +901,7 @@ function startRace(kind, ti) {
   }
   // headlight for your car at night
   headLight.intensity = def.night ? 60 : 0; world.add(headLight); world.add(headLight.target);
-  raceT = 0; countdown = kind === "race" ? 3.6 : 1.5; ended = false; paused = false;
+  raceT = 0; nitroT = 0; countdown = kind === "race" ? 3.6 : 1.5; ended = false; paused = false;
   Object.assign(drift, { active: false, pts: 0, combo: 1, t: 0, calm: 0, total: 0, best: 0 });
   camA = me.a; mode = "race"; showScreen(null); $("hud").hidden = false; document.body.classList.toggle("driftmode", kind === "drift");
   $("lapBox").hidden = kind !== "race"; $("driftBox").hidden = false; $("posBox").hidden = kind !== "race";
@@ -930,6 +930,8 @@ function endRace() {
     }
     PROF.stars[def.id + gameMode] = Math.max(PROF.stars[def.id + gameMode] || 0, stars);
     PROF.coins += coins; saveProf(); setTimeout(() => offerDouble(coins), 600);
+    $("resRank").hidden = true;
+    challengeEvent({ mode: gameMode, track: def.id, place: me.place, best: me.best, finished: me.finished, driftBest: drift.best, driftTotal: drift.total, nitroT, car: me.def.id });
     $("resTitle").textContent = title; $("resSub").textContent = sub; $("resCoins").textContent = "+" + ar(coins);
     const tb = $("resTable"); tb.innerHTML = "";
     if (gameMode === "race") { const order = cars.slice().sort((a, b) => (a.finished && b.finished ? a.finishT - b.finishT : b.dist - a.dist)); order.forEach((c, i) => { const r = document.createElement("div"); if (c === me) r.className = "me"; const a = document.createElement("b"), n = document.createElement("span"), t = document.createElement("i"); a.textContent = ar(i + 1); n.textContent = c.name; t.textContent = c.finished ? fmtT(c.finishT) : "—"; r.append(a, n, t); tb.append(r); }); }
@@ -1019,6 +1021,7 @@ function update(dt) {
   }
   raceT += dt;
   input.read(me, dt);
+  if (me.nitroOn && me.nitro > 0) nitroT += dt;
   const leader = Math.max(...cars.map((c) => c.dist));
   for (const c of cars) {
     if (c.ai || (c === me && window.__auto)) { if (c.finished) { c.thr = 0; c.brk = 0.4; c.steer = 0; } else aiDrive(c, dt, leader, me.dist); }
@@ -1405,3 +1408,152 @@ function offerCoins() {
   });
 }
 adsInit();
+
+// ---------------- challenges (daily + weekly) and the online leaderboard ----------------
+// Daily tasks and the weekly challenge work offline. The leaderboard needs a Supabase project
+// (meta dk-sb-url / dk-sb-key); without it that tab says it is not set up yet and nothing breaks.
+const SB = { url: ((document.querySelector('meta[name="dk-sb-url"]') || {}).content || "").replace(/\/$/, ""), key: (document.querySelector('meta[name="dk-sb-key"]') || {}).content || "" };
+const SB_ON = /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SB.url) && SB.key.length > 20;
+const TRACK_IDS = TRACKS.map((t) => t.id);
+const LAP_TARGET = { falcon: 68, port: 56, mount: 64 }; // a fair "good lap" per track, in seconds
+
+// a stable random id for this phone, so your best score replaces your old one
+function playerId() {
+  let id = store.get("dk.pid", "");
+  if (!/^[0-9a-f-]{36}$/.test(id)) { id = (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16))); store.set("dk.pid", id); }
+  return id;
+}
+function playerName() { const n = ($("nick").value || "").trim(); if (n && n !== "أنت") return n.slice(0, 16); let g = store.get("dk.guest", ""); if (!g) { g = "سواق " + (1000 + Math.floor(Math.random() * 9000)).toLocaleString("ar-EG", { useGrouping: false }); store.set("dk.guest", g); } return g; }
+function dayKey(d = new Date()) { const t = new Date(d.getTime() + 3 * 3600e3); return t.toISOString().slice(0, 10); } // Riyadh day
+function weekKey(d = new Date()) {
+  const t = new Date(d.getTime() + 3 * 3600e3), x = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()));
+  const day = (x.getUTCDay() + 6) % 7; x.setUTCDate(x.getUTCDate() - day + 3);
+  const y = x.getUTCFullYear(), first = new Date(Date.UTC(y, 0, 4)), w = 1 + Math.round(((x - first) / 864e5 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
+  return y + "-W" + String(w).padStart(2, "0");
+}
+const seedOf = (s) => { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
+const trackName = (id) => (TRACKS.find((t) => t.id === id) || TRACKS[0]).name;
+
+// ---- daily tasks: three a day, the same for everyone on that date ----
+const DAILY_POOL = [
+  (R) => ({ id: "win", text: "فز بسباق واحد", reward: 350 }),
+  (R) => { const t = TRACK_IDS[Math.floor(R() * 3)]; return { id: "podium", track: t, text: "خلّص في أول ٣ في " + trackName(t), reward: 280 }; },
+  (R) => { const n = [3000, 5000, 8000][Math.floor(R() * 3)]; return { id: "drift1", n, text: "تفحيطة وحدة فوق " + ar(n) + " نقطة", reward: 260 }; },
+  (R) => { const n = [20000, 30000, 40000][Math.floor(R() * 3)]; return { id: "driftT", n, text: "اجمع " + ar(n) + " نقطة في جولة تفحيط", reward: 320 }; },
+  (R) => { const t = TRACK_IDS[Math.floor(R() * 3)]; return { id: "lap", track: t, n: LAP_TARGET[t], text: "لفة أسرع من " + fmtT(LAP_TARGET[t]) + " في " + trackName(t), reward: 300 }; },
+  (R) => ({ id: "nitro", n: 12, text: "استخدم النيترو ١٢ ثانية في سباق", reward: 200 }),
+  (R) => { const c = CARS[Math.floor(R() * CARS.length)]; return { id: "car", car: c.id, text: "خلّص سباق بسيارة " + c.name, reward: 220 }; },
+];
+function dailyToday() {
+  const key = dayKey(), R = rng(seedOf("day" + key)), picks = [], used = new Set();
+  while (picks.length < 3) { const i = Math.floor(R() * DAILY_POOL.length); if (used.has(i)) continue; used.add(i); picks.push(DAILY_POOL[i](R)); }
+  if (!PROF.daily || PROF.daily.key !== key) { PROF.daily = { key, done: [], claimed: [] }; saveProf(); }
+  return picks;
+}
+// ---- weekly challenge: one track and mode for the whole week, with its own board ----
+function weeklyNow() {
+  const wk = weekKey(), R = rng(seedOf("wk" + wk)), track = TRACK_IDS[Math.floor(R() * 3)], kind = R() < 0.5 ? "lap" : "drift";
+  const target = kind === "lap" ? LAP_TARGET[track] - 2 : [35000, 45000, 55000][Math.floor(R() * 3)];
+  if (!PROF.weekly || PROF.weekly.key !== wk) { PROF.weekly = { key: wk, best: null, claimed: false }; saveProf(); }
+  return { wk, track, kind, target, reward: 1200,
+    text: kind === "lap" ? "أسرع لفة في " + trackName(track) + " – الهدف أقل من " + fmtT(target) : "أعلى نقاط تفحيط في " + trackName(track) + " – الهدف " + ar(target) };
+}
+function taskDone(t, ev) {
+  if (t.id === "win") return ev.mode === "race" && ev.place === 1;
+  if (t.id === "podium") return ev.mode === "race" && ev.track === t.track && ev.place <= 3;
+  if (t.id === "drift1") return ev.driftBest >= t.n;
+  if (t.id === "driftT") return ev.mode === "drift" && ev.driftTotal >= t.n;
+  if (t.id === "lap") return ev.mode === "race" && ev.track === t.track && ev.best <= t.n;
+  if (t.id === "nitro") return ev.mode === "race" && ev.nitroT >= t.n;
+  if (t.id === "car") return ev.mode === "race" && ev.car === t.car && ev.finished;
+  return false;
+}
+// called once at the end of every race / drift session
+function challengeEvent(ev) {
+  const fresh = [];
+  dailyToday().forEach((t, i) => { if (!PROF.daily.done.includes(i) && taskDone(t, ev)) { PROF.daily.done.push(i); fresh.push(t.text); } });
+  const W = weeklyNow();
+  if (ev.track === W.track && ((W.kind === "lap" && ev.mode === "race" && isFinite(ev.best)) || (W.kind === "drift" && ev.mode === "drift"))) {
+    const v = W.kind === "lap" ? ev.best : ev.driftTotal;
+    if (PROF.weekly.best == null || (W.kind === "lap" ? v < PROF.weekly.best : v > PROF.weekly.best)) PROF.weekly.best = v;
+  }
+  saveProf(); chalBadge();
+  if (fresh.length) setTimeout(() => popup("✓ " + fresh[0] + " – استلم جائزتك من التحديات", "big"), 900);
+  // the board keeps your best lap per track (races) and your best drift session per track
+  if (ev.mode === "race" && isFinite(ev.best)) lbSubmit("lap", ev.track, ev.best);
+  if (ev.mode === "drift" && ev.driftTotal > 0) lbSubmit("drift", ev.track, ev.driftTotal);
+}
+function chalReady() { const d = dailyToday(), W = weeklyNow(); let n = PROF.daily.done.filter((i) => !PROF.daily.claimed.includes(i)).length; if (!PROF.weekly.claimed && weeklyHit(W)) n++; return n; }
+function weeklyHit(W) { const b = PROF.weekly.best; return b != null && (W.kind === "lap" ? b <= W.target : b >= W.target); }
+function chalBadge() { const n = chalReady(), b = $("chalBadge"); if (b) { b.hidden = !n; b.textContent = ar(n); } }
+
+// ---- leaderboard (Supabase REST, no library) ----
+const LB = { last: null };
+async function sb(path, body) {
+  const res = await fetch(SB.url + "/rest/v1/" + path, { method: body ? "POST" : "GET", headers: { apikey: SB.key, Authorization: "Bearer " + SB.key, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) throw new Error("sb " + res.status);
+  return res.status === 204 ? null : res.json();
+}
+async function lbSubmit(kind, track, value) {
+  if (!SB_ON) return;
+  const v = kind === "lap" ? Math.round(value * 1000) / 1000 : Math.round(value);
+  try {
+    await sb("rpc/dk_submit", { p_player: playerId(), p_name: playerName(), p_kind: kind, p_track: track, p_car: PROF.car, p_value: v, p_week: weekKey() });
+    const rank = await lbRank(kind, track, weekKey());
+    LB.last = { kind, track, rank };
+    const el = $("resRank"); if (el && mode === "results") { el.hidden = false; el.textContent = rank ? "🏆 ترتيبك هذا الأسبوع في " + trackName(track) + ": #" + ar(rank) : "🏆 انحفظ رقمك في لوحة الصدارة"; }
+  } catch (e) { /* offline: try again next race */ }
+}
+async function lbTop(kind, track, period, limit = 50) {
+  return sb("dk_scores?select=player_id,name,car,value&period=eq." + encodeURIComponent(period) + "&kind=eq." + kind + "&track=eq." + track + "&order=value." + (kind === "lap" ? "asc" : "desc") + ",updated_at.asc&limit=" + limit);
+}
+async function lbRank(kind, track, period) { const rows = await lbTop(kind, track, period, 100); const i = rows.findIndex((r) => r.player_id === playerId()); return i < 0 ? 0 : i + 1; }
+
+// ---- UI ----
+let chalTab = "daily", lbSel = { kind: "lap", track: "falcon", period: "week" };
+function chalOpen() { $("chal").hidden = false; chalRender(); }
+function chalRender() {
+  document.querySelectorAll("#chal .ctabs button").forEach((b) => b.classList.toggle("on", b.dataset.c === chalTab));
+  const box = $("chalBody"); box.innerHTML = "";
+  const row = (text, sub, state, reward, onClaim) => {
+    const r = document.createElement("div"); r.className = "crow " + state;
+    const t = document.createElement("div"), b = document.createElement("b"), s = document.createElement("small"); b.textContent = text; s.textContent = sub; t.append(b, s);
+    const a = document.createElement("button"); a.type = "button"; a.className = "cbtn";
+    a.textContent = state === "claimed" ? "✓ استلمت" : state === "ready" ? "استلم " + ar(reward) + " 🪙" : ar(reward) + " 🪙"; a.disabled = state !== "ready";
+    if (state === "ready") a.addEventListener("click", onClaim);
+    r.append(t, a); box.append(r);
+  };
+  if (chalTab === "daily") {
+    const d = dailyToday();
+    d.forEach((t, i) => { const done = PROF.daily.done.includes(i), claimed = PROF.daily.claimed.includes(i);
+      row(t.text, done ? "خلّصته 👏" : "يتجدد بكرة", claimed ? "claimed" : done ? "ready" : "todo", t.reward, () => { PROF.daily.claimed.push(i); PROF.coins += t.reward; saveProf(); $("coins").textContent = ar(PROF.coins); tone(880, 0.12, "triangle", 0.06); chalBadge(); chalRender(); }); });
+    const p = document.createElement("p"); p.className = "cnote"; p.textContent = "التحديات تتغير كل يوم الساعة ١٢ بالليل."; box.append(p);
+  } else if (chalTab === "weekly") {
+    const W = weeklyNow(), b = PROF.weekly.best, hit = weeklyHit(W);
+    row(W.text, b == null ? "ما لعبته هذا الأسبوع" : "أحسن نتيجة لك: " + (W.kind === "lap" ? fmtT(b) : ar(Math.round(b))), PROF.weekly.claimed ? "claimed" : hit ? "ready" : "todo", W.reward, () => { PROF.weekly.claimed = true; PROF.coins += W.reward; saveProf(); $("coins").textContent = ar(PROF.coins); tone(880, 0.12, "triangle", 0.06); chalBadge(); chalRender(); });
+    const go = document.createElement("button"); go.type = "button"; go.className = "btn"; go.textContent = "العب التحدي ▶";
+    go.addEventListener("click", () => { $("chal").hidden = true; audio(); goFullscreen(); PROF.car = CARS[gar.sel].id; saveProf(); startRace(W.kind === "lap" ? "race" : "drift", TRACK_IDS.indexOf(W.track)); });
+    box.append(go);
+    const p = document.createElement("p"); p.className = "cnote"; p.textContent = "التحدي يتغير كل أسبوع. نتيجتك تدخل لوحة الصدارة تلقائياً."; box.append(p);
+  } else {
+    const ctl = document.createElement("div"); ctl.className = "lbctl";
+    const seg = (key, opts) => { const s = document.createElement("div"); s.className = "chiprow"; for (const [v, l] of opts) { const b = document.createElement("button"); b.type = "button"; b.className = "chip" + (lbSel[key] === v ? " on" : ""); b.textContent = l; b.addEventListener("click", () => { lbSel[key] = v; chalRender(); }); s.append(b); } return s; };
+    ctl.append(seg("kind", [["lap", "أسرع لفة"], ["drift", "التفحيط"]]), seg("track", TRACKS.map((t) => [t.id, t.name])), seg("period", [["week", "هذا الأسبوع"], ["all", "كل الأوقات"]]));
+    box.append(ctl);
+    const list = document.createElement("div"); list.className = "lblist"; box.append(list);
+    if (!SB_ON) { list.innerHTML = '<p class="cnote">لوحة الصدارة الأونلاين بتشتغل قريب.</p>'; return; }
+    list.innerHTML = '<p class="cnote">جاري التحميل…</p>';
+    const sel = { ...lbSel };
+    lbTop(sel.kind, sel.track, sel.period === "week" ? weekKey() : "all").then((rows) => {
+      if (JSON.stringify(sel) !== JSON.stringify(lbSel)) return; list.innerHTML = "";
+      if (!rows.length) { list.innerHTML = '<p class="cnote">ما فيه أحد هنا للحين. كن الأول! 🏁</p>'; return; }
+      const me2 = playerId();
+      rows.forEach((r, i) => { const d = document.createElement("div"); d.className = "lbrow" + (r.player_id === me2 ? " me" : ""); const a = document.createElement("b"), n = document.createElement("span"), c = document.createElement("small"), v = document.createElement("i");
+        a.textContent = i < 3 ? ["🥇", "🥈", "🥉"][i] : ar(i + 1); n.textContent = r.name; c.textContent = (CARS.find((x) => x.id === r.car) || {}).name || ""; v.textContent = sel.kind === "lap" ? fmtT(+r.value) : ar(Math.round(+r.value)); d.append(a, n, c, v); list.append(d); });
+    }).catch(() => { list.innerHTML = '<p class="cnote">ما قدرنا نجيب اللوحة. تأكد من النت وحاول مرة ثانية.</p>'; });
+  }
+}
+$("chalBtn").addEventListener("click", () => { tone(600, 0.05, "triangle", 0.03); chalOpen(); });
+$("chalClose").addEventListener("click", () => { $("chal").hidden = true; });
+document.querySelectorAll("#chal .ctabs button").forEach((b) => b.addEventListener("click", () => { chalTab = b.dataset.c; chalRender(); }));
+dailyToday(); weeklyNow(); chalBadge();

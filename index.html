@@ -168,12 +168,18 @@ body.racing, .hud { touch-action: none; overscroll-behavior: none; }
 .chb { right: calc(max(20px, env(safe-area-inset-right, 0px)) + 14px); bottom: calc(140px + env(safe-area-inset-bottom, 0px)); width: 82px; height: 82px; font-size: 14px; border-color: rgba(255,63,138,.8); }
 .cnit { right: calc(max(20px, env(safe-area-inset-right, 0px)) + 112px); bottom: calc(112px + env(safe-area-inset-bottom, 0px)); width: 66px; height: 66px; font-size: 13px; border-color: rgba(102,204,255,.8); }
 body:not(.touch) .ctls { display: none; }
-body.tilt .cl, body.tilt .cr { display: none; }
+body.tilt .cl, body.tilt .cr, body.wheelctl .cl, body.wheelctl .cr { display: none; }
+.wheel { position: absolute; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); width: 172px; height: 172px; pointer-events: auto; touch-action: none; display: none; opacity: .92; will-change: transform; filter: drop-shadow(0 4px 10px rgba(0,0,0,.5)); }
+body.wheelctl.touch .wheel { display: block; }
+/* with the wheel, the speedometer moves next to it so nothing overlaps */
+body.wheelctl.touch .dash { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 186px); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+@media (max-height: 430px) { body.wheelctl.touch .dash { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 150px); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); } }
+@media (max-height: 380px) { .wheel { width: 140px; height: 140px; } }
 @media (max-height: 430px) { .cl, .cr { width: 84px; height: 84px; } .cr { left: calc(max(20px, env(safe-area-inset-left, 0px)) + 98px); } .cgas { width: 92px; height: 92px; } .chb { bottom: calc(124px + env(safe-area-inset-bottom, 0px)); width: 72px; height: 72px; } .cnit { bottom: calc(100px + env(safe-area-inset-bottom, 0px)); right: calc(max(20px, env(safe-area-inset-right, 0px)) + 100px); } .cbrk { right: calc(max(20px, env(safe-area-inset-right, 0px)) + 104px); width: 72px; height: 72px; } .pos { font-size: 38px; } #mini { width: 100px; height: 100px; } .logo { font-size: 22px; } .gpanel { max-height: calc(100dvh - 76px); } }
 .overlay { position: absolute; inset: 0; display: grid; place-content: center; background: rgba(8,9,12,.7); direction: rtl; z-index: 20; }
 .sbox { width: min(400px, 92vw); background: #14161c; border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 12px; }
 .sbox h2 { margin: 0; font-family: var(--fd); }
-.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; } .seg.two { grid-template-columns: 1fr 1fr; }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; } .seg.two { grid-template-columns: 1fr 1fr; } .seg.three { grid-template-columns: repeat(3, 1fr); }
 .seg button { padding: 9px 4px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--txt); font-size: 13px; cursor: pointer; }
 .seg button.on { background: var(--hot); color: #1a0e00; border-color: var(--hot); font-weight: 700; }
 .check { display: flex; gap: 10px; align-items: center; } .check input { width: 22px; height: 22px; accent-color: var(--hot); }
@@ -246,6 +252,19 @@ body.tilt .cl, body.tilt .cr { display: none; }
     <button class="btn reset" id="resetBtn" type="button" hidden>رجّعني للطريق (R)</button>
     <div class="dash"><div class="gauge" id="rpm"><span>كم/س</span><b id="spd">٠</b></div><div class="gear">الغيار <b id="gear">١</b></div><div class="nbar" aria-label="النيترو"><i id="nitroBar"></i></div></div>
     <div class="ctls">
+      <div class="wheel" id="wheel" aria-label="الدركسون: اسحب يمين ويسار">
+        <svg viewBox="-100 -100 200 200" width="100%" height="100%" aria-hidden="true">
+          <defs><radialGradient id="wg" cx="50%" cy="40%" r="60%"><stop offset="0" stop-color="#3a3d44"/><stop offset="1" stop-color="#15161a"/></radialGradient></defs>
+          <circle r="92" fill="none" stroke="#0e0f12" stroke-width="20"/>
+          <circle r="92" fill="none" stroke="url(#wg)" stroke-width="16"/>
+          <circle r="92" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="2"/>
+          <rect x="-7" y="-100" width="14" height="18" rx="3" fill="#ff7a1a"/>
+          <path d="M-84 6 L-30 14 L-22 34 L22 34 L30 14 L84 6 L84 -6 L28 -10 L-28 -10 L-84 -6 Z" fill="url(#wg)" stroke="#0e0f12" stroke-width="3"/>
+          <path d="M-14 30 L-10 86 L10 86 L14 30 Z" fill="url(#wg)" stroke="#0e0f12" stroke-width="3"/>
+          <circle r="30" fill="url(#wg)" stroke="#0e0f12" stroke-width="3"/>
+          <circle r="16" fill="#1d1f24" stroke="#ff7a1a" stroke-width="2.5"/>
+        </svg>
+      </div>
       <button class="ctl cl" data-hold="left" type="button" aria-label="يسار">◀</button>
       <button class="ctl cr" data-hold="right" type="button" aria-label="يمين">▶</button>
       <button class="ctl cgas" data-hold="gas" type="button">بنزين</button>
@@ -267,7 +286,7 @@ body.tilt .cl, body.tilt .cr { display: none; }
     <div class="sbox">
       <h2>الإعدادات</h2>
       <div>الجودة</div><div class="seg"><button type="button" data-q="auto">تلقائي</button><button type="button" data-q="low">منخفضة</button><button type="button" data-q="medium">متوسطة</button><button type="button" data-q="high">عالية</button></div>
-      <div>التوجيه في الجوال</div><div class="seg two"><button type="button" data-ctl="buttons">أزرار</button><button type="button" data-ctl="tilt">إمالة الجوال</button></div>
+      <div>التوجيه في الجوال</div><div class="seg three"><button type="button" data-ctl="wheel">دركسون</button><button type="button" data-ctl="buttons">أزرار</button><button type="button" data-ctl="tilt">إمالة الجوال</button></div>
       <label class="check"><input type="checkbox" id="soundOn"> الصوت</label>
       <p class="mdesc">الكمبيوتر: الأسهم أو WASD، Space تفحيط، Shift نيترو، C الكاميرا</p>
       <button class="btn" id="setDone" type="button">تم</button>

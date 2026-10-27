@@ -14,6 +14,8 @@ const store = {
 };
 const SETTINGS = Object.assign({ quality: "auto", sound: true, cam: 0, ctl: "buttons", diff: "normal" }, store.get("dk.settings", {}));
 function saveSettings() { store.set("dk.settings", SETTINGS); }
+// new: the on-screen steering wheel becomes the default control on phones (once)
+if (!SETTINGS.ctl2) { SETTINGS.ctl = "wheel"; SETTINGS.ctl2 = 1; saveSettings(); }
 function mergeAll(gs) { if (gs.every((g) => !!g.index) || gs.every((g) => !g.index)) return mergeGeometries(gs); return mergeGeometries(gs.map((g) => (g.index ? g.toNonIndexed() : g))); }
 function boxAt(w, h, d, x, y, z) { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); return g; }
 function fmtT(s) { if (!isFinite(s)) return "--:--"; const m = Math.floor(s / 60), r = s - m * 60; return ar(m) + ":" + (r < 10 ? "٠" : "") + r.toFixed(2).replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[d]).replace(".", "٫"); }
@@ -37,11 +39,11 @@ function adaptRes(dt) {
   else if (fps > 58.5 && ADAPT.scale < 1) { ADAPT.scale = Math.min(1, ADAPT.scale + 0.05); setRes(); }
 }
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 3000);
+const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 3000); // a near plane a little further out = steadier depth, no flicker on the car
 const hemi = new THREE.HemisphereLight(0xdfeefa, 0x5b5a3c, 0.8); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff1d6, 2.6); sun.castShadow = true;
 const sc = sun.shadow.camera; sc.left = -40; sc.right = 40; sc.top = 40; sc.bottom = -40; sc.near = 1; sc.far = 260;
-sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04; scene.add(sun); scene.add(sun.target);
+sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.06; scene.add(sun); scene.add(sun.target);
 function resize() { const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 window.addEventListener("resize", resize);
 function applyQuality() {
@@ -76,7 +78,7 @@ function noiseFill(g, w, h, col, n, a) { g.fillStyle = col; g.fillRect(0, 0, w, 
 let ac = null, master = null;
 function audio() {
   if (!SETTINGS.sound) return null;
-  if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); master = ac.createGain(); master.gain.value = 0.8; master.connect(ac.destination); } catch (e) { return null; } }
+  if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); master = ac.createGain(); master.gain.value = 0.7; master.connect(ac.destination); } catch (e) { return null; } }
   if (ac.state === "suspended") ac.resume(); return ac;
 }
 let noiseBuf = null;
@@ -87,30 +89,58 @@ function noise(vol, dur, f0, f1) {
   s.buffer = noiseBuf; f.type = "bandpass"; f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t + dur);
 }
-function tone(freq, dur, type = "square", vol = 0.05, slide = 0) {
+function tone(freq, dur, type = "sine", vol = 0.05, slide = 0) {
+  if (type === "square") type = "triangle"; // no harsh beeps
   const a = audio(); if (!a) return; const t = a.currentTime, o = a.createOscillator(), g = a.createGain();
   o.type = type; o.frequency.setValueAtTime(freq, t); if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), t + dur);
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(master); o.start(t); o.stop(t + dur);
 }
 function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
-// engine: two detuned oscillators through a filter, plus a looping tyre squeal
+// engine: a deep harmonic "rumble" at the firing frequency, a little combustion noise pulsing with it,
+// all through a soft low-pass so it sounds like an engine and not a buzzer; tyres squeal quietly
 const engine = { on: false };
+function engineWave(a) {
+  const n = 14, re = new Float32Array(n), im = new Float32Array(n);
+  const h = [0, 1, 0.72, 0.4, 0.46, 0.22, 0.26, 0.12, 0.14, 0.06, 0.07, 0.03, 0.035, 0.015];
+  for (let i = 1; i < n; i++) im[i] = h[i] * (i % 2 ? 1 : -1);
+  return a.createPeriodicWave(re, im);
+}
 function engineStart() {
   const a = audio(); if (!a || engine.on) return;
-  const o1 = a.createOscillator(), o2 = a.createOscillator(), o3 = a.createOscillator(), f = a.createBiquadFilter(), g = a.createGain();
-  o1.type = "sawtooth"; o2.type = "square"; o3.type = "sawtooth"; f.type = "lowpass"; f.frequency.value = 900; f.Q.value = 3; g.gain.value = 0;
-  for (const o of [o1, o2, o3]) { o.connect(f); o.start(); } f.connect(g); g.connect(master);
-  const sq = a.createBufferSource(); if (!noiseBuf) noise(0.0001, 0.01, 1000, 1000); sq.buffer = noiseBuf; sq.loop = true;
-  const sf = a.createBiquadFilter(); sf.type = "bandpass"; sf.frequency.value = 2600; sf.Q.value = 6; const sg = a.createGain(); sg.gain.value = 0; sq.connect(sf); sf.connect(sg); sg.connect(master); sq.start();
-  Object.assign(engine, { on: true, o1, o2, o3, f, g, sq, sg });
+  if (!noiseBuf) noise(0.0001, 0.01, 1000, 1000);
+  const wave = engineWave(a);
+  const main = a.createOscillator(), sub = a.createOscillator(); main.setPeriodicWave(wave); sub.type = "sine";
+  const subG = a.createGain(); subG.gain.value = 0.55;
+  // combustion texture: filtered noise whose loudness pulses at the firing rate
+  const grit = a.createBufferSource(); grit.buffer = noiseBuf; grit.loop = true;
+  const gritF = a.createBiquadFilter(); gritF.type = "bandpass"; gritF.Q.value = 0.9; gritF.frequency.value = 240;
+  const gritG = a.createGain(); gritG.gain.value = 0.0;
+  const pulse = a.createOscillator(); pulse.type = "sine"; const pulseDepth = a.createGain(); pulseDepth.gain.value = 0.0; pulse.connect(pulseDepth); pulseDepth.connect(gritG.gain);
+  const lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 0.6; lp.frequency.value = 500;
+  const body = a.createBiquadFilter(); body.type = "peaking"; body.frequency.value = 110; body.Q.value = 0.8; body.gain.value = 5;
+  const shaper = a.createWaveShaper(); const curve = new Float32Array(512); for (let i = 0; i < 512; i++) { const x = i / 255.5 - 1; curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); } shaper.curve = curve;
+  const g = a.createGain(); g.gain.value = 0;
+  main.connect(lp); sub.connect(subG); subG.connect(lp); grit.connect(gritF); gritF.connect(gritG); gritG.connect(lp);
+  lp.connect(body); body.connect(shaper); shaper.connect(g); g.connect(master);
+  // tyre squeal: soft, lower pitch, with a slow wobble
+  const sq = a.createBufferSource(); sq.buffer = noiseBuf; sq.loop = true;
+  const sf = a.createBiquadFilter(); sf.type = "bandpass"; sf.frequency.value = 1250; sf.Q.value = 5;
+  const sf2 = a.createBiquadFilter(); sf2.type = "lowpass"; sf2.frequency.value = 2200;
+  const sg = a.createGain(); sg.gain.value = 0; sq.connect(sf); sf.connect(sf2); sf2.connect(sg); sg.connect(master);
+  for (const o of [main, sub, pulse]) o.start(); grit.start(); sq.start();
+  Object.assign(engine, { on: true, main, sub, pulse, pulseDepth, grit, gritF, gritG, lp, g, sq, sf, sg });
 }
-function engineStop() { if (!engine.on) return; try { const t = ac.currentTime; engine.g.gain.setTargetAtTime(0, t, 0.05); engine.sg.gain.setTargetAtTime(0, t, 0.05); for (const o of [engine.o1, engine.o2, engine.o3, engine.sq]) o.stop(t + 0.3); } catch (e) {} engine.on = false; }
+function engineStop() { if (!engine.on) return; try { const t = ac.currentTime; engine.g.gain.setTargetAtTime(0, t, 0.06); engine.sg.gain.setTargetAtTime(0, t, 0.05); for (const o of [engine.main, engine.sub, engine.pulse, engine.grit, engine.sq]) o.stop(t + 0.35); } catch (e) {} engine.on = false; }
 function engineTick(rpm, thr, slip) {
-  if (!engine.on || !ac) return; const t = ac.currentTime, f = 38 + rpm * 150;
-  engine.o1.frequency.setTargetAtTime(f, t, 0.03); engine.o2.frequency.setTargetAtTime(f * 0.5, t, 0.03); engine.o3.frequency.setTargetAtTime(f * 1.505, t, 0.03);
-  engine.f.frequency.setTargetAtTime(500 + rpm * 1800 + thr * 600, t, 0.05);
-  engine.g.gain.setTargetAtTime(0.035 + thr * 0.04 + rpm * 0.01, t, 0.05);
-  engine.sg.gain.setTargetAtTime(clamp((slip - 0.18) * 0.22, 0, 0.12), t, 0.06);
+  if (!engine.on || !ac) return; const t = ac.currentTime;
+  const f = 42 + rpm * 150; // firing frequency: a low idle burble up to a strong high note
+  engine.main.frequency.setTargetAtTime(f, t, 0.045); engine.sub.frequency.setTargetAtTime(f * 0.5, t, 0.045); engine.pulse.frequency.setTargetAtTime(f, t, 0.045);
+  engine.gritF.frequency.setTargetAtTime(180 + rpm * 520, t, 0.06);
+  engine.gritG.gain.setTargetAtTime(0.05 + thr * 0.09, t, 0.06); engine.pulseDepth.gain.setTargetAtTime(0.04 + thr * 0.08, t, 0.06);
+  engine.lp.frequency.setTargetAtTime(300 + rpm * 1100 + thr * 450, t, 0.07);
+  engine.g.gain.setTargetAtTime(0.045 + thr * 0.045 + rpm * 0.015, t, 0.08);
+  const sk = clamp((slip - 0.25) * 0.16, 0, 0.055);
+  engine.sg.gain.setTargetAtTime(sk, t, 0.08); engine.sf.frequency.setTargetAtTime(1150 + Math.sin(t * 7) * 90 + slip * 120, t, 0.05);
 }
 
 // ---------------- cars ----------------
@@ -352,6 +382,13 @@ function kitGeo(c, sp) {
 }
 
 // ---- materials ----
+// a copy of a material that wins the depth test against the surface right under it
+const ON_TOP = new Map();
+function onTop(mat, layer) {
+  const set = (m) => { m.polygonOffset = true; m.polygonOffsetFactor = -layer; m.polygonOffsetUnits = -layer * 4; return m; };
+  if (!Object.values(CMAT).includes(mat)) return set(mat); // this car's own material (roof, lights): change it in place so later colour changes still apply
+  const k = mat.uuid + layer; if (!ON_TOP.has(k)) ON_TOP.set(k, set(mat.clone())); return ON_TOP.get(k);
+}
 const CMAT = {};
 function sharedMats() {
   if (CMAT.ready) return CMAT; CMAT.ready = true;
@@ -371,9 +408,9 @@ function grilleTex() { const t = canvasTex(128, 64, (g, w, h) => { g.fillStyle =
 function tireTex() { const t = canvasTex(256, 16, (g, w, h) => { g.fillStyle = "#1a1a1a"; g.fillRect(0, 0, w, h); g.fillStyle = "#0d0d0d"; for (let x = 0; x < w; x += 8) g.fillRect(x, 0, 3, h); }, true); t.repeat.set(1, 1); return t; }
 function plateTex() { return canvasTex(128, 32, (g, w, h) => { g.fillStyle = "#f4f4f0"; g.fillRect(0, 0, w, h); g.strokeStyle = "#111"; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, h - 2); g.fillStyle = "#111"; g.font = "bold 18px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("ملوك ٧٧٧", w / 2, h / 2 + 1); }); }
 function blobTex() { return canvasTex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 4, 32, 32, 32); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); }); }
-const FIN = { gloss: { m: 0.05, r: 0.32, cc: 1, ccr: 0.04 }, metal: { m: 0.65, r: 0.3, cc: 1, ccr: 0.05 }, matte: { m: 0.15, r: 0.72, cc: 0, ccr: 0.6 }, pearl: { m: 0.35, r: 0.24, cc: 1, ccr: 0.04, ir: 1 }, chrome: { m: 1, r: 0.06, cc: 1, ccr: 0.02 } };
+const FIN = { gloss: { m: 0.0, r: 0.38, cc: 1, ccr: 0.05 }, metal: { m: 0.32, r: 0.36, cc: 1, ccr: 0.06 }, matte: { m: 0.05, r: 0.8, cc: 0, ccr: 0.6 }, pearl: { m: 0.2, r: 0.32, cc: 1, ccr: 0.05, ir: 1 }, chrome: { m: 0.95, r: 0.1, cc: 1, ccr: 0.03 } };
 function paintMaterial(hq) {
-  return hq ? new THREE.MeshPhysicalMaterial({ color: 0xffffff, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2 }) : new THREE.MeshStandardMaterial({ color: 0xffffff, envMapIntensity: 1.2 });
+  return hq ? new THREE.MeshPhysicalMaterial({ color: 0xffffff, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 0.9 }) : new THREE.MeshStandardMaterial({ color: 0xffffff, envMapIntensity: 0.75 });
 }
 function applyFinish(m, f) {
   const F = FIN[f] || FIN.metal; m.metalness = F.m; m.roughness = F.r;
@@ -423,9 +460,9 @@ function makeCarMesh(c, look, hq, lo) {
   const calMat = new THREE.MeshStandardMaterial({ color: look.caliper, roughness: 0.4, metalness: 0.2 });
   const headMat = new THREE.MeshStandardMaterial({ color: 0xb9c4cf, emissive: 0xfff3dd, emissiveIntensity: 0.18, roughness: 0.06, metalness: 1 });
   const tailMat = new THREE.MeshStandardMaterial({ color: 0x5a0000, emissive: 0xff1414, emissiveIntensity: 0.8, roughness: 0.2 });
-  const add = (geo, mat, cast = true) => { if (!geo) return null; const m = new THREE.Mesh(geo, mat); m.castShadow = cast; m.receiveShadow = true; body.add(m); return m; };
-  add(G.paint, paintMat); const roof = add(G.roof, roofMat, !lo); add(G.glass, glassMat); add(G.trim, M.trim, !lo); add(G.carbon, M.carbon, !lo); add(G.chrome, M.chrome, false);
-  add(G.head, headMat, false); add(G.drl, M.drl, false); add(G.tail, tailMat, false); if (!lo) add(G.plate, M.plate, false); add(G.grille, M.grille, false);
+  const add = (geo, mat, cast = true, layer = 0) => { if (!geo) return null; const m = new THREE.Mesh(geo, layer ? onTop(mat, layer) : mat); m.castShadow = cast; m.receiveShadow = false; m.renderOrder = layer; body.add(m); return m; };
+  add(G.paint, paintMat); add(G.glass, glassMat); const roof = add(G.roof, roofMat, !lo, 2); add(G.trim, M.trim, !lo, 2); add(G.carbon, M.carbon, !lo, 2); add(G.chrome, M.chrome, false, 2);
+  add(G.head, headMat, false, 3); add(G.drl, M.drl, false, 4); add(G.tail, tailMat, false, 3); if (!lo) add(G.plate, M.plate, false, 2); add(G.grille, M.grille, false, 3);
   const kit = new THREE.Group(); body.add(kit);
   const wheels = [];
   for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
@@ -1111,6 +1148,7 @@ function watchStuck(dt, sp) {
 }
 function hud(dt, sp) {
   watchStuck(dt, sp);
+  if (window.__wheel && SETTINGS.ctl === "wheel") window.__wheel.el.style.transform = "rotate(" + (window.__wheel.a * 57.3).toFixed(1) + "deg)";
   hudAcc += dt;
   // drift meter every frame (it's the fun part)
   const dm = $("driftNow");
@@ -1156,6 +1194,14 @@ const input = (() => {
   const ctlEls = [...document.querySelectorAll("[data-hold]")], ptrs = new Map();
   let rects = null; const measure = () => { rects = ctlEls.map((b) => [b.dataset.hold, b.getBoundingClientRect()]); };
   const hitKey = (x, y) => { let best = null, bd = 1e9; for (const [k, r] of rects) { if (!r.width) continue; const cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2, d = Math.hypot(x - cx, y - cy), rad = r.width / 2 + 18; if (d < rad && d < bd) { bd = d; best = k; } } return best; };
+  const WHEEL = { ptr: null, a0: 0, a: 0, held: false, el: $("wheel") };
+  const wheelAng = (x, y) => { const r = WHEEL.el.getBoundingClientRect(); return Math.atan2(x - (r.left + r.width / 2), -(y - (r.top + r.height / 2))); };
+  const onWheel = (x, y) => { if (SETTINGS.ctl !== "wheel" || !WHEEL.el.offsetWidth) return false; const r = WHEEL.el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2; return Math.hypot(x - cx, y - cy) < r.width / 2 + 26; };
+  window.addEventListener("pointerdown", (e) => { if (mode !== "race" || paused || !onWheel(e.clientX, e.clientY)) return; e.preventDefault(); e.stopImmediatePropagation(); WHEEL.ptr = e.pointerId; WHEEL.held = true; WHEEL.a0 = wheelAng(e.clientX, e.clientY) - WHEEL.a; audio(); }, { passive: false, capture: true });
+  window.addEventListener("pointermove", (e) => { if (e.pointerId !== WHEEL.ptr) return; let a = wheelAng(e.clientX, e.clientY) - WHEEL.a0; a = Math.atan2(Math.sin(a), Math.cos(a)); WHEEL.a = clamp(a, -1.75, 1.75); }, { capture: true });
+  const wheelUp = (e) => { if (e.pointerId !== WHEEL.ptr) return; WHEEL.ptr = null; WHEEL.held = false; };
+  window.addEventListener("pointerup", wheelUp, { capture: true }); window.addEventListener("pointercancel", wheelUp, { capture: true });
+  window.__wheel = WHEEL;
   const sync = () => { for (const k in held) held[k] = false; for (const k of ptrs.values()) held[k] = true; for (const b of ctlEls) b.classList.toggle("down", !!held[b.dataset.hold]); };
   window.addEventListener("pointerdown", (e) => { if (mode !== "race" || paused || e.pointerType === "mouse") return; measure(); const k = hitKey(e.clientX, e.clientY); if (!k) return; e.preventDefault(); ptrs.set(e.pointerId, k); sync(); audio(); }, { passive: false });
   window.addEventListener("pointermove", (e) => { if (!ptrs.has(e.pointerId)) return; const k = hitKey(e.clientX, e.clientY); if (k && k !== ptrs.get(e.pointerId)) { ptrs.set(e.pointerId, k); sync(); } });
@@ -1173,6 +1219,12 @@ const input = (() => {
       const L = keys["arrowleft"] || keys["a"] || held.left, R = keys["arrowright"] || keys["d"] || held.right;
       let target = (R ? 1 : 0) - (L ? 1 : 0);
       if (SETTINGS.ctl === "tilt" && IS_TOUCH) target = Math.abs(tilt) < 0.06 ? 0 : tilt;
+      if (SETTINGS.ctl === "wheel" && WHEEL.el.offsetWidth) {
+        // the wheel turns ±100°; let go and it springs back to the middle, like a real one
+        if (!WHEEL.held) WHEEL.a += (0 - WHEEL.a) * (1 - Math.exp(-dt * 9));
+        const w = WHEEL.a / 1.75; target = Math.abs(w) < 0.03 ? 0 : Math.sign(w) * Math.pow(Math.abs(w), 1.15);
+        if (!L && !R) { steerV += (target - steerV) * (1 - Math.exp(-dt * 22)); c.steer = steerV; target = steerV; }
+      }
       // digital steering eases in so it feels like a wheel
       const touchK = IS_TOUCH ? 1.9 : 1; // fingers want a sharper response than a keyboard
       const rate = (target === 0 ? 8 : Math.sign(target) !== Math.sign(steerV) ? 11 : 5.5) * touchK;
@@ -1347,7 +1399,7 @@ function settingsUi() {
 $("setBtn").addEventListener("click", () => { settingsUi(); $("settings").hidden = false; });
 $("setPause").addEventListener("click", () => { settingsUi(); $("settings").hidden = false; });
 document.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("click", () => { SETTINGS.quality = b.dataset.q; saveSettings(); applyQuality(); settingsUi(); }));
-document.querySelectorAll("[data-ctl]").forEach((b) => b.addEventListener("click", () => { SETTINGS.ctl = b.dataset.ctl; saveSettings(); settingsUi(); document.body.classList.toggle("tilt", SETTINGS.ctl === "tilt"); if (SETTINGS.ctl === "tilt" && window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission().catch(() => {}); }));
+document.querySelectorAll("[data-ctl]").forEach((b) => b.addEventListener("click", () => { SETTINGS.ctl = b.dataset.ctl; saveSettings(); settingsUi(); document.body.classList.toggle("tilt", SETTINGS.ctl === "tilt"); document.body.classList.toggle("wheelctl", SETTINGS.ctl === "wheel"); if (SETTINGS.ctl === "tilt" && window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission().catch(() => {}); }));
 $("soundOn").addEventListener("change", (e) => { SETTINGS.sound = e.target.checked; saveSettings(); if (!SETTINGS.sound) engineStop(); });
 $("setDone").addEventListener("click", () => { $("settings").hidden = true; });
 $("nick").value = store.get("dk.nick", ""); $("nick").addEventListener("change", () => store.set("dk.nick", $("nick").value.trim()));
@@ -1358,7 +1410,7 @@ async function goFullscreen() {
 }
 // on phones: the first touch anywhere goes full screen and turns the game sideways straight away
 if (IS_TOUCH) { const first = () => { goFullscreen(); }; window.addEventListener("pointerup", first, { once: true }); document.addEventListener("fullscreenchange", () => { if (document.fullscreenElement) { try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} } }); }
-document.body.classList.toggle("touch", IS_TOUCH); document.body.classList.toggle("tilt", SETTINGS.ctl === "tilt");
+document.body.classList.toggle("touch", IS_TOUCH); document.body.classList.toggle("tilt", SETTINGS.ctl === "tilt"); document.body.classList.toggle("wheelctl", SETTINGS.ctl === "wheel");
 // ---------------- boot ----------------
 applyQuality(); buildGarage(); gar.sel = Math.max(0, CARS.findIndex((c) => c.id === PROF.car)); showScreen("garage"); garageUi();
 requestAnimationFrame(frame); setTimeout(offerCoins, 2500);

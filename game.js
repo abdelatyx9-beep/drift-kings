@@ -6,7 +6,7 @@ const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
-const ar = (n) => Number(n).toLocaleString("ar-EG");
+const ar = (n) => Number(n).toLocaleString(SETTINGS.lang === "ar" || (!SETTINGS.lang && /^ar\b/i.test(navigator.language || "")) ? "ar-EG" : "en-US");
 const IS_TOUCH = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -18,7 +18,7 @@ function saveSettings() { store.set("dk.settings", SETTINGS); }
 if (!SETTINGS.ctl2) { SETTINGS.ctl = "wheel"; SETTINGS.ctl2 = 1; saveSettings(); }
 function mergeAll(gs) { if (gs.every((g) => !!g.index) || gs.every((g) => !g.index)) return mergeGeometries(gs); return mergeGeometries(gs.map((g) => (g.index ? g.toNonIndexed() : g))); }
 function boxAt(w, h, d, x, y, z) { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); return g; }
-function fmtT(s) { if (!isFinite(s)) return "--:--"; const m = Math.floor(s / 60), r = s - m * 60; return ar(m) + ":" + (r < 10 ? "٠" : "") + r.toFixed(2).replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[d]).replace(".", "٫"); }
+function fmtT(s) { if (!isFinite(s)) return "--:--"; const m = Math.floor(s / 60), r = s - m * 60, t = m + ":" + (r < 10 ? "0" : "") + r.toFixed(2); return LANG === "en" ? t : t.replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[d]).replace(".", "٫"); }
 function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
 
 // ---------------- renderer ----------------
@@ -84,7 +84,7 @@ let ac = null, master = null;
 function audio() {
   if (!SETTINGS.sound) return null;
   if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); master = ac.createGain(); master.gain.value = 0.7; master.connect(ac.destination); } catch (e) { return null; } }
-  if (ac.state === "suspended") ac.resume(); return ac;
+  if (ac.state === "suspended" && !(window.OfflineAudioContext && ac instanceof OfflineAudioContext)) ac.resume(); return ac;
 }
 let noiseBuf = null;
 function noise(vol, dur, f0, f1) {
@@ -101,51 +101,156 @@ function tone(freq, dur, type = "sine", vol = 0.05, slide = 0) {
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(master); o.start(t); o.stop(t + dur);
 }
 function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
-// engine: a deep harmonic "rumble" at the firing frequency, a little combustion noise pulsing with it,
-// all through a soft low-pass so it sounds like an engine and not a buzzer; tyres squeal quietly
+// engine sound, built like racing games do it: short recorded-style loops of an engine at a fixed rpm,
+// replayed faster or slower to follow the rev counter, with a low loop and a high loop crossfaded.
+// The loops are made here once: a 4-cylinder firing pulse train (each bang a little different, like a real
+// engine) passed through exhaust-pipe resonances, plus intake hiss. No harsh oscillators.
 const engine = { on: false };
-function engineWave(a) {
-  const n = 14, re = new Float32Array(n), im = new Float32Array(n);
-  const h = [0, 1, 0.72, 0.4, 0.46, 0.22, 0.26, 0.12, 0.14, 0.06, 0.07, 0.03, 0.035, 0.015];
-  for (let i = 1; i < n; i++) im[i] = h[i] * (i % 2 ? 1 : -1);
-  return a.createPeriodicWave(re, im);
+let ENG_LOOPS = null;
+function makeEngineLoop(a, rpm, bright) {
+  const sr = a.sampleRate, fire = rpm / 60 * 2, per = sr / fire, cycles = Math.round(fire * 1.2), n = Math.round(per * cycles);
+  const buf = a.createBuffer(1, n, sr), d = buf.getChannelData(0), R = rng(rpm | 0);
+  // pulse train: each combustion is a quick thump with a decaying tail; strength and timing vary a little
+  const amp = []; for (let k = 0; k < cycles; k++) amp.push(0.75 + R() * 0.5 * (k % 4 === 2 ? 0.6 : 1));
+  for (let k = 0; k < cycles; k++) {
+    const t0 = Math.round(k * per + (R() - 0.5) * per * 0.06), dec = per * (bright ? 0.22 : 0.3);
+    for (let i = 0; i < per * 1.6; i++) { const j = (t0 + i) % n; const e = Math.exp(-i / dec); d[j] += amp[k] * e * (i < 12 ? i / 12 : 1) * (1 + (R() - 0.5) * 0.5); }
+  }
+  // exhaust resonances (pipe and muffler) as simple two-pole resonators
+  const res = (src, f, q, g) => { const w = 2 * Math.PI * f / sr, r = Math.exp(-w / (2 * q)), a1 = -2 * r * Math.cos(w), a2 = r * r, out = new Float32Array(src.length); let y1 = 0, y2 = 0; for (let pass = 0; pass < 2; pass++) for (let i = 0; i < src.length; i++) { const y = (1 - r) * src[i] - a1 * y1 - a2 * y2; y2 = y1; y1 = y; if (pass) out[i] = y * g; } return out; };
+  const src = Float32Array.from(d), mix = new Float32Array(n);
+  for (const [f, q, g] of bright ? [[95, 3, 1.0], [260, 4, 0.9], [620, 5, 0.55], [1350, 6, 0.25]] : [[70, 3, 1.2], [180, 4, 0.8], [430, 5, 0.35]]) { const o = res(src, f, q, g); for (let i = 0; i < n; i++) mix[i] += o[i]; }
+  // intake / mechanical hiss, shaped by the firing rhythm
+  let lp = 0; for (let i = 0; i < n; i++) { lp += ((R() * 2 - 1) - lp) * (bright ? 0.25 : 0.12); mix[i] += lp * (bright ? 0.05 : 0.03) * (0.5 + 0.5 * Math.cos(2 * Math.PI * (i % per) / per)); }
+  // remove DC, normalise, soft-clip a touch for body
+  let m = 0; for (let i = 0; i < n; i++) m += mix[i]; m /= n; let pk = 0; for (let i = 0; i < n; i++) { mix[i] -= m; pk = Math.max(pk, Math.abs(mix[i])); }
+  for (let i = 0; i < n; i++) d[i] = Math.tanh(mix[i] / pk * 1.4) * 0.8;
+  return { buf, rpm };
 }
 function engineStart() {
   const a = audio(); if (!a || engine.on) return;
   if (!noiseBuf) noise(0.0001, 0.01, 1000, 1000);
-  const wave = engineWave(a);
-  const main = a.createOscillator(), sub = a.createOscillator(); main.setPeriodicWave(wave); sub.type = "sine";
-  const subG = a.createGain(); subG.gain.value = 0.55;
-  // combustion texture: filtered noise whose loudness pulses at the firing rate
-  const grit = a.createBufferSource(); grit.buffer = noiseBuf; grit.loop = true;
-  const gritF = a.createBiquadFilter(); gritF.type = "bandpass"; gritF.Q.value = 0.9; gritF.frequency.value = 240;
-  const gritG = a.createGain(); gritG.gain.value = 0.0;
-  const pulse = a.createOscillator(); pulse.type = "sine"; const pulseDepth = a.createGain(); pulseDepth.gain.value = 0.0; pulse.connect(pulseDepth); pulseDepth.connect(gritG.gain);
-  const lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 0.6; lp.frequency.value = 500;
-  const body = a.createBiquadFilter(); body.type = "peaking"; body.frequency.value = 110; body.Q.value = 0.8; body.gain.value = 5;
-  const shaper = a.createWaveShaper(); const curve = new Float32Array(512); for (let i = 0; i < 512; i++) { const x = i / 255.5 - 1; curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); } shaper.curve = curve;
-  const g = a.createGain(); g.gain.value = 0;
-  main.connect(lp); sub.connect(subG); subG.connect(lp); grit.connect(gritF); gritF.connect(gritG); gritG.connect(lp);
-  lp.connect(body); body.connect(shaper); shaper.connect(g); g.connect(master);
-  // tyre squeal: soft, lower pitch, with a slow wobble
+  if (!ENG_LOOPS) ENG_LOOPS = [makeEngineLoop(a, 1500, false), makeEngineLoop(a, 4500, true)];
+  const out = a.createGain(); out.gain.value = 0;
+  const tone_ = a.createBiquadFilter(); tone_.type = "lowpass"; tone_.Q.value = 0.5; tone_.frequency.value = 900;
+  // phone speakers can't play deep bass: drop the rumble they can't reproduce and lift the 150–500 Hz growl they can
+  const hp = a.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 55; const mid = a.createBiquadFilter(); mid.type = "peaking"; mid.frequency.value = 240; mid.Q.value = 0.9; mid.gain.value = 5;
+  tone_.connect(hp); hp.connect(mid); mid.connect(out); out.connect(master);
+  const layers = ENG_LOOPS.map((L) => { const s = a.createBufferSource(); s.buffer = L.buf; s.loop = true; const g = a.createGain(); g.gain.value = 0; s.connect(g); g.connect(tone_); s.start(0, Math.random() * L.buf.duration); return { s, g, rpm: L.rpm }; });
+  // tyre squeal: soft and low, with a slow wobble
   const sq = a.createBufferSource(); sq.buffer = noiseBuf; sq.loop = true;
-  const sf = a.createBiquadFilter(); sf.type = "bandpass"; sf.frequency.value = 1250; sf.Q.value = 5;
-  const sf2 = a.createBiquadFilter(); sf2.type = "lowpass"; sf2.frequency.value = 2200;
-  const sg = a.createGain(); sg.gain.value = 0; sq.connect(sf); sf.connect(sf2); sf2.connect(sg); sg.connect(master);
-  for (const o of [main, sub, pulse]) o.start(); grit.start(); sq.start();
-  Object.assign(engine, { on: true, main, sub, pulse, pulseDepth, grit, gritF, gritG, lp, g, sq, sf, sg });
+  const sf = a.createBiquadFilter(); sf.type = "bandpass"; sf.frequency.value = 1150; sf.Q.value = 6;
+  const sf2 = a.createBiquadFilter(); sf2.type = "lowpass"; sf2.frequency.value = 2000;
+  const sg = a.createGain(); sg.gain.value = 0; sq.connect(sf); sf.connect(sf2); sf2.connect(sg); sg.connect(master); sq.start();
+  Object.assign(engine, { on: true, layers, tone: tone_, out, sq, sf, sg, lastThr: 0, pop: 0 });
 }
-function engineStop() { if (!engine.on) return; try { const t = ac.currentTime; engine.g.gain.setTargetAtTime(0, t, 0.06); engine.sg.gain.setTargetAtTime(0, t, 0.05); for (const o of [engine.main, engine.sub, engine.pulse, engine.grit, engine.sq]) o.stop(t + 0.35); } catch (e) {} engine.on = false; }
-function engineTick(rpm, thr, slip) {
-  if (!engine.on || !ac) return; const t = ac.currentTime;
-  const f = 42 + rpm * 150; // firing frequency: a low idle burble up to a strong high note
-  engine.main.frequency.setTargetAtTime(f, t, 0.045); engine.sub.frequency.setTargetAtTime(f * 0.5, t, 0.045); engine.pulse.frequency.setTargetAtTime(f, t, 0.045);
-  engine.gritF.frequency.setTargetAtTime(180 + rpm * 520, t, 0.06);
-  engine.gritG.gain.setTargetAtTime(0.05 + thr * 0.09, t, 0.06); engine.pulseDepth.gain.setTargetAtTime(0.04 + thr * 0.08, t, 0.06);
-  engine.lp.frequency.setTargetAtTime(300 + rpm * 1100 + thr * 450, t, 0.07);
-  engine.g.gain.setTargetAtTime(0.045 + thr * 0.045 + rpm * 0.015, t, 0.08);
-  const sk = clamp((slip - 0.25) * 0.16, 0, 0.055);
-  engine.sg.gain.setTargetAtTime(sk, t, 0.08); engine.sf.frequency.setTargetAtTime(1150 + Math.sin(t * 7) * 90 + slip * 120, t, 0.05);
+function engineStop() { if (!engine.on) return; try { const t = ac.currentTime; engine.out.gain.setTargetAtTime(0, t, 0.06); engine.sg.gain.setTargetAtTime(0, t, 0.05); for (const L of engine.layers) L.s.stop(t + 0.35); engine.sq.stop(t + 0.35); } catch (e) {} engine.on = false; }
+// a soft exhaust pop when you lift off at high revs
+function exhaustPop() { const a = audio(); if (!a) return; const t = a.currentTime, s = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain(); s.buffer = noiseBuf; f.type = "lowpass"; f.frequency.value = 500 + Math.random() * 300; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.09, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09); s.connect(f); f.connect(g); g.connect(master); s.start(t, Math.random()); s.stop(t + 0.12); }
+function engineTick(rpm, thr, slip, at) {
+  if (!engine.on || !ac) return; const t = at != null ? at : ac.currentTime;
+  const r = 950 + clamp(rpm, 0, 1) * 6300; // rev counter in rpm
+  const lo = engine.layers[0], hi = engine.layers[1], x = clamp((r - 1800) / 3200, 0, 1);
+  lo.s.playbackRate.setTargetAtTime(r / lo.rpm, t, 0.04); hi.s.playbackRate.setTargetAtTime(r / hi.rpm, t, 0.04);
+  lo.g.gain.setTargetAtTime(Math.cos(x * Math.PI / 2), t, 0.05); hi.g.gain.setTargetAtTime(Math.sin(x * Math.PI / 2), t, 0.05);
+  // on the throttle the engine is louder and brighter; off it, a quieter overrun burble
+  engine.tone.frequency.setTargetAtTime(500 + thr * 2200 + r * 0.12, t, 0.08);
+  engine.out.gain.setTargetAtTime(0.09 + thr * 0.11 + clamp(rpm, 0, 1) * 0.04, t, 0.07);
+  if (engine.lastThr > 0.5 && thr < 0.2 && rpm > 0.55) engine.pop = 0.5; engine.lastThr = thr;
+  if (engine.pop > 0 && at == null) { engine.pop -= 1 / 60; if (Math.random() < 0.12) exhaustPop(); }
+  const sk = clamp((slip - 0.25) * 0.15, 0, 0.05);
+  engine.sg.gain.setTargetAtTime(sk, t, 0.08); engine.sf.frequency.setTargetAtTime(1050 + Math.sin(t * 7) * 80 + slip * 120, t, 0.05);
+}
+// test hook: render a few seconds of engine sound offline (used to check the sound before shipping)
+window.__engineDemo = async (secs = 9) => {
+  const sr = 44100, oc = new OfflineAudioContext(1, sr * secs, sr), keep = [ac, master, engine.on];
+  ac = oc; master = oc.createGain(); master.gain.value = 0.7; master.connect(oc.destination); engine.on = false; ENG_LOOPS = null; noiseBuf = null;
+  const realAudio = SETTINGS.sound; SETTINGS.sound = true;
+  engineStart();
+  // script: idle, rev through 4 gears on full throttle, lift off, idle again
+  const steps = Math.round(secs * 60); let fwd = 0;
+  for (let i = 0; i < steps; i++) {
+    const tt = i / 60, thr = tt > 1 && tt < 6.5 ? 1 : 0; fwd = thr ? Math.min(60, fwd + 9 / 60) : Math.max(0, fwd - 14 / 60);
+    const rpm = clamp((fwd % 14) / 14 * 0.8 + Math.min(1, fwd / 60) * 0.2, 0, 1);
+    engineTick(rpm, thr, 0, tt);
+  }
+  const buf = await oc.startRendering();
+  [ac, master] = keep; engine.on = false; ENG_LOOPS = null; noiseBuf = null; SETTINGS.sound = realAudio;
+  return Array.from(buf.getChannelData(0));
+};
+
+// ---------------- language (Arabic / English) ----------------
+// The Arabic text in the code is the key. T("...{n}...", { n }) returns the English line when the game is in
+// English, and fills the {placeholders} either way. Static text in the page is swapped once at start.
+const LANG = SETTINGS.lang || (/^ar\b/i.test(navigator.language || "") ? "ar" : "en");
+const EN = {
+  // page
+  "الحلبة": "Track", "ملوك التفحيط": "Drift Kings", "اسمك": "Your name", "التحديات ولوحة الصدارة": "Challenges and leaderboard",
+  "شاهد إعلان واحصل على ٣٠٠ عملة": "Watch an ad for 300 coins", "الإعدادات": "Settings", "السيارة اللي قبل": "Previous car", "السيارة اللي بعد": "Next car",
+  "اختر": "Select", "الصبغ": "Paint", "الجنوط": "Wheels", "القطع": "Parts", "الترقيات": "Upgrades", "العب ▶": "Play ▶",
+  "اسحب على السيارة عشان تلفها": "Drag the car to spin it", "اختر السباق": "Choose a race", "رجوع للكراج": "Back to garage",
+  "🏁 سباق": "🏁 Race", "💨 تفحيط": "💨 Drift", "الصعوبة": "Difficulty", "سهل": "Easy", "عادي": "Normal", "صعب": "Hard", "انطلق": "Go",
+  "فزت!": "You won!", "🎬 شاهد إعلان وضاعف الجائزة": "🎬 Watch an ad to double the prize", "مرة ثانية": "Race again", "الكراج": "Garage",
+  "لفة": "Lap", "خريطة الحلبة": "Track map", "إيقاف مؤقت": "Pause", "غيّر الكاميرا": "Change camera", "نقاط التفحيط": "Drift points", "تفحيط": "Drift",
+  "⚠ الاتجاه غلط!": "⚠ Wrong way!", "رجّعني للطريق (R)": "Back on track (R)", "كم/س": "km/h", "الغيار": "Gear", "النيترو": "Nitro",
+  "الدركسون: اسحب يمين ويسار": "Steering wheel: drag left and right", "يسار": "Left", "يمين": "Right", "بنزين": "Gas", "فرامل": "Brake", "نيترو": "Nitro",
+  "التحديات والصدارة 🏆": "Challenges & Leaderboard 🏆", "إغلاق": "Close", "اليوم": "Today", "الأسبوع": "This week", "الصدارة": "Leaderboard",
+  "كمّل": "Resume", "من البداية": "Restart", "اطلع للكراج": "Quit to garage", "الجودة": "Quality", "تلقائي": "Auto", "منخفضة": "Low", "متوسطة": "Medium", "عالية": "High",
+  "التوجيه في الجوال": "Steering on phone", "دركسون": "Wheel", "أزرار": "Buttons", "إمالة الجوال": "Tilt", "الصوت": "Sound", "اللغة": "Language",
+  "الكمبيوتر: الأسهم أو WASD، Space تفحيط، Shift نيترو، C الكاميرا": "Computer: arrows or WASD, Space handbrake, Shift nitro, C camera",
+  "تم": "Done", "لف الجوال بالعرض 📱↔️": "Turn your phone sideways 📱↔️", "عشان تسوق": "to drive",
+  // cars, tracks, parts
+  "صقر GT": "Saqr GT", "ذيب R": "Theeb R", "عاصفة V8": "Asifa V8", "برق X": "Barq X", "نمر S": "Nimr S", "هامور 4×4": "Hamour 4×4",
+  "كوبيه رياضية متوازنة وسهلة": "Balanced, easy sports coupe", "يابانية خفيفة، الخلفية تلف بسهولة": "Light tuner, the rear steps out easily",
+  "أمريكية عضلات، قوة وحشية": "American muscle, brutal power", "سوبركار بمحرك وسطي، تلتصق بالأرض": "Mid-engine supercar, glued to the road",
+  "سيدان كلاسيكية طويلة، ملكة التفحيط": "Long classic sedan, queen of drift", "جيب عالي وقوي، يفحّط ويطلع الطعوس": "Tall, tough 4×4 that drifts and climbs dunes",
+  "حلبة الصقر": "Falcon Circuit", "ميناء الليل": "Night Port", "طريق الجبل": "Mountain Road",
+  "حلبة نهارية سريعة فيها منعطفات طويلة": "Fast day circuit with long sweepers", "شوارع مضاءة بالليل وزوايا حادة": "Lit night streets and tight corners",
+  "منعطفات متتالية، مثالية للتفحيط": "Back-to-back bends, perfect for drifting",
+  "المحرك": "Engine", "الكفرات": "Tyres", "التوجيه": "Steering", "لامع": "Gloss", "ميتاليك": "Metallic", "مطفي": "Matte", "لؤلؤي": "Pearl", "كروم": "Chrome",
+  "بدون": "None", "خطين": "Twin stripes", "خط جانبي": "Side stripe", "رقم": "Number", "خطين ورقم": "Stripes + number", "لونين": "Two-tone",
+  "نفس اللون": "Body colour", "اللون الثاني": "Second colour", "أسود": "Black", "شفة": "Lip", "بطة": "Ducktail", "جناح": "Wing", "جناح كبير": "GT wing",
+  "رياضي": "Sport", "شبكي": "Mesh", "صحن": "Deep dish", "خماسي": "5-spoke", "توربين": "Turbine", "فاتح": "Light", "متوسط": "Medium",
+  "السرعة": "Speed", "التسارع": "Accel", "الثبات": "Grip", "سيارتك ✓": "Your car ✓", "اختر هذي السيارة": "Pick this car", "كامل": "Maxed",
+  "ما عندك فلوس كفاية، العب وجمّع": "Not enough coins yet. Race to earn more", "لون مخصص": "Custom colour", "لون السيارة": "Car colour", "اللمعة": "Finish",
+  "الرسمة": "Livery", "لون الرسمة": "Livery colour", "رقم السيارة": "Car number", "السقف": "Roof", "لون السقف": "Roof colour", "تظليل الزجاج": "Window tint",
+  "شكل الجنوط": "Wheel style", "لون الجنوط": "Wheel colour", "لون الكاليبر": "Caliper colour", "الجناح": "Spoiler", "تنزيل السيارة": "Ride height",
+  "نيون تحت السيارة": "Underglow", "لون دخان التفحيط": "Tyre smoke colour", "خط البداية": "Start line",
+  // racing
+  "أنت": "You", "فهد": "Fahad", "سلطان": "Sultan", "ريم": "Reem", "ماجد": "Majed", "نورة": "Noura", "خالد": "Khalid", "عزوز": "Azooz", "بندر": "Bandar",
+  "سباق {n} لفات – خلك الأول!": "{n}-lap race. Finish first!", "تفحيط لمدة دقيقتين – كل ما طولت التفحيطة زاد المضاعف": "Two minutes of drifting. Longer drifts build a bigger multiplier",
+  "فزت بالسباق! 🏆": "You won the race! 🏆", "المركز {n}": "Position {n}", "وقتك {t} – أحسن لفة {b}": "Your time {t}, best lap {b}",
+  "{s} تفحيط ممتاز!": "{s} Great drifting!", "خلص الوقت": "Time's up", "نقاطك {n} – أطول تفحيطة {b}": "Your score {n}, longest drift {b}", " – رقم قياسي جديد!": ". New record!",
+  "انطلق!": "GO!", "لفة {n} – {t}": "Lap {n}: {t}", "أحسن لفة {t}": "Best lap {t}", "أحسن تفحيطة {n}": "Best drift {n}", "اصطدمت! ضاعت النقاط": "Crashed! Points lost",
+  "سباق ضد ٧ سواقين بنفس مستوى سيارتك – السباق متقارب لين النهاية": "Race 7 drivers at your car's level. It stays close to the finish",
+  "دقيقتين تفحيط – جمّع نقاط وكومبو": "Two minutes of drifting. Rack up points and combos",
+  // challenges
+  "سواق {n}": "Driver {n}", "فز بسباق واحد": "Win a race", "خلّص في أول ٣ في {t}": "Finish top 3 at {t}", "تفحيطة وحدة فوق {n} نقطة": "A single drift over {n} points",
+  "اجمع {n} نقطة في جولة تفحيط": "Score {n} in one drift session", "لفة أسرع من {t} في {k}": "Lap faster than {t} at {k}", "استخدم النيترو ١٢ ثانية في سباق": "Use 12 seconds of nitro in a race",
+  "خلّص سباق بسيارة {c}": "Finish a race in the {c}", "أسرع لفة في {k} – الهدف أقل من {t}": "Fastest lap at {k}. Target: under {t}",
+  "أعلى نقاط تفحيط في {k} – الهدف {n}": "Top drift score at {k}. Target: {n}", "✓ {t} – استلم جائزتك من التحديات": "✓ {t}. Claim your prize in Challenges",
+  "🏆 ترتيبك هذا الأسبوع في {k}: #{n}": "🏆 Your rank this week at {k}: #{n}", "🏆 انحفظ رقمك في لوحة الصدارة": "🏆 Your time is on the leaderboard",
+  "✓ استلمت": "✓ Claimed", "استلم {n} 🪙": "Claim {n} 🪙", "خلّصته 👏": "Done 👏", "يتجدد بكرة": "New tasks tomorrow",
+  "التحديات تتغير كل يوم الساعة ١٢ بالليل.": "Daily tasks change every day at midnight (Riyadh time).", "ما لعبته هذا الأسبوع": "Not played this week",
+  "أحسن نتيجة لك: {v}": "Your best: {v}", "العب التحدي ▶": "Play the challenge ▶", "التحدي يتغير كل أسبوع. نتيجتك تدخل لوحة الصدارة تلقائياً.": "A new challenge every week. Your result goes on the leaderboard automatically.",
+  "أسرع لفة": "Fastest lap", "التفحيط": "Drift", "هذا الأسبوع": "This week", "كل الأوقات": "All time", "لوحة الصدارة الأونلاين بتشتغل قريب.": "The online leaderboard is coming soon.",
+  "جاري التحميل…": "Loading…", "ما فيه أحد هنا للحين. كن الأول! 🏁": "No one here yet. Be the first! 🏁", "ما قدرنا نجيب اللوحة. تأكد من النت وحاول مرة ثانية.": "Couldn't load the board. Check your connection and try again.",
+};
+function T(s, v) {
+  let out = LANG === "en" && EN[s] != null ? EN[s] : s;
+  if (v) out = out.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m));
+  return out;
+}
+// swap the Arabic text already in the page (labels, buttons, hints) for English
+function localizePage() {
+  document.documentElement.lang = LANG; document.documentElement.dir = LANG === "ar" ? "rtl" : "ltr";
+  document.body.classList.toggle("en", LANG === "en");
+  document.title = T("ملوك التفحيط");
+  if (LANG !== "en") return;
+  for (const el of document.querySelectorAll("#app b, #app span, #app small, #app div")) if (el.childElementCount === 0 && /^[٠-٩/×:٫]+$/.test(el.textContent.trim())) el.textContent = el.textContent.replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace("٫", ".");
+  const walk = document.createTreeWalker($("app"), NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) { const t = n.nodeValue.trim(); if (t && EN[t] != null) n.nodeValue = n.nodeValue.replace(t, EN[t]); }
+  for (const el of $("app").querySelectorAll("[aria-label],[placeholder],[title]")) for (const a of ["aria-label", "placeholder", "title"]) { const t = el.getAttribute(a); if (t && EN[t] != null) el.setAttribute(a, EN[t]); }
 }
 
 // ---------------- cars ----------------
@@ -411,7 +516,7 @@ function sharedMats() {
 function carbonTex() { return canvasTex(64, 64, (g, w, h) => { for (let y = 0; y < h; y += 8) for (let x = 0; x < w; x += 8) { const k = ((x + y) / 8) % 2; const gr = g.createLinearGradient(x, y, x + 8, y + 8); gr.addColorStop(0, k ? "#2a2d32" : "#16181b"); gr.addColorStop(1, k ? "#16181b" : "#2a2d32"); g.fillStyle = gr; g.fillRect(x, y, 8, 8); } }, true); }
 function grilleTex() { const t = canvasTex(128, 64, (g, w, h) => { g.fillStyle = "#050505"; g.fillRect(0, 0, w, h); g.strokeStyle = "#3a3c40"; g.lineWidth = 2; for (let y = 0; y < h + 8; y += 8) for (let x = (y / 8) % 2 ? 4 : 0; x < w + 8; x += 8) { g.beginPath(); g.moveTo(x - 4, y); g.lineTo(x, y - 4); g.lineTo(x + 4, y); g.lineTo(x, y + 4); g.closePath(); g.stroke(); } }, true); t.repeat.set(40, 6); return t; }
 function tireTex() { const t = canvasTex(256, 16, (g, w, h) => { g.fillStyle = "#1a1a1a"; g.fillRect(0, 0, w, h); g.fillStyle = "#0d0d0d"; for (let x = 0; x < w; x += 8) g.fillRect(x, 0, 3, h); }, true); t.repeat.set(1, 1); return t; }
-function plateTex() { return canvasTex(128, 32, (g, w, h) => { g.fillStyle = "#f4f4f0"; g.fillRect(0, 0, w, h); g.strokeStyle = "#111"; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, h - 2); g.fillStyle = "#111"; g.font = "bold 18px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("ملوك ٧٧٧", w / 2, h / 2 + 1); }); }
+function plateTex() { return canvasTex(128, 32, (g, w, h) => { g.fillStyle = "#f4f4f0"; g.fillRect(0, 0, w, h); g.strokeStyle = "#111"; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, h - 2); g.fillStyle = "#111"; g.font = "bold 18px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(LANG === "en" ? "DK 777" : "ملوك ٧٧٧", w / 2, h / 2 + 1); }); }
 function blobTex() { return canvasTex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 4, 32, 32, 32); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); }); }
 const FIN = { gloss: { m: 0.0, r: 0.42, cc: 1, ccr: 0.14 }, metal: { m: 0.3, r: 0.42, cc: 1, ccr: 0.15 }, matte: { m: 0.05, r: 0.82, cc: 0, ccr: 0.6 }, pearl: { m: 0.18, r: 0.38, cc: 1, ccr: 0.14, ir: 1 }, chrome: { m: 0.9, r: 0.22, cc: 1, ccr: 0.12 } };
 function paintMaterial(hq) {
@@ -697,10 +802,10 @@ function trackTextures() {
   TEX.grass = canvasTex(512, 512, (g, w, h) => { g.fillStyle = "#58773a"; g.fillRect(0, 0, w, h); for (let i = 0; i < 12000; i++) { g.fillStyle = `hsla(${78 + Math.random() * 30},${30 + Math.random() * 25}%,${22 + Math.random() * 22}%,0.55)`; g.fillRect(Math.random() * w, Math.random() * h, 1 + Math.random() * 2, 2 + Math.random() * 4); } for (let x = 0; x < w; x += 64) { g.fillStyle = "rgba(255,255,255,0.035)"; g.fillRect(x, 0, 32, h); } }, true);
   TEX.ground = canvasTex(512, 512, (g, w, h) => { g.fillStyle = "#d4d4d4"; g.fillRect(0, 0, w, h); for (let i = 0; i < 14000; i++) { const v = 150 + Math.random() * 105; g.fillStyle = `rgba(${v},${v},${v * 0.95},0.5)`; g.fillRect(Math.random() * w, Math.random() * h, 1 + Math.random() * 2, 2 + Math.random() * 4); } }, true);
   TEX.asph = canvasTex(256, 256, (g, w, h) => { noiseFill(g, w, h, "#1c1d21", 7000, 0.1); g.strokeStyle = "rgba(255,255,255,0.05)"; for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(Math.random() * w, 0); g.lineTo(Math.random() * w, h); g.stroke(); } }, true);
-  TEX.wallD = canvasTex(256, 64, (g, w, h) => { for (let x = 0; x < w; x += 64) { g.fillStyle = (x / 64) % 2 ? "#e9e9e9" : "#1f5fd0"; g.fillRect(x, 0, 64, h); } g.fillStyle = "#ffffff"; g.font = "bold 22px sans-serif"; g.textAlign = "center"; g.fillText("ملوك", 32, 40); g.fillText("التفحيط", 160, 40); }, true);
+  TEX.wallD = canvasTex(256, 64, (g, w, h) => { for (let x = 0; x < w; x += 64) { g.fillStyle = (x / 64) % 2 ? "#e9e9e9" : "#1f5fd0"; g.fillRect(x, 0, 64, h); } g.fillStyle = "#ffffff"; g.font = "bold 22px sans-serif"; g.textAlign = "center"; if (LANG === "en") { g.font = "bold 20px sans-serif"; g.fillText("DRIFT", 32, 40); g.fillText("KINGS", 160, 40); } else { g.fillText("ملوك", 32, 40); g.fillText("التفحيط", 160, 40); } }, true);
   TEX.wallN = canvasTex(256, 64, (g, w, h) => { g.fillStyle = "#2a2c31"; g.fillRect(0, 0, w, h); g.fillStyle = "#18c8ff"; g.fillRect(0, 6, w, 4); g.fillStyle = "#ff3fa0"; g.fillRect(0, h - 10, w, 4); for (let x = 0; x < w; x += 32) { g.fillStyle = "rgba(255,255,255,0.15)"; g.fillRect(x, 14, 2, h - 28); } }, true);
   TEX.checker = canvasTex(64, 256, (g, w, h) => { const s = 16; for (let y = 0; y < h; y += s) for (let x = 0; x < w; x += s) { g.fillStyle = ((x + y) / s) % 2 ? "#111" : "#f4f4f4"; g.fillRect(x, y, s, s); } });
-  TEX.banner = canvasTex(512, 64, (g, w, h) => { const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, "#d62828"); gr.addColorStop(1, "#f2a541"); g.fillStyle = gr; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.font = "bold 38px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("ملوك التفحيط – خط البداية", w / 2, h / 2 + 2); });
+  TEX.banner = canvasTex(512, 64, (g, w, h) => { const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, "#d62828"); gr.addColorStop(1, "#f2a541"); g.fillStyle = gr; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.font = "bold 38px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(T("ملوك التفحيط") + " – " + T("خط البداية"), w / 2, h / 2 + 2); });
   TEX.crowd = canvasTex(512, 32, (g, w, h) => { g.fillStyle = "#333"; g.fillRect(0, 0, w, h); for (let x = 0; x < w; x += 6) { g.fillStyle = `hsl(${Math.random() * 360},60%,${40 + Math.random() * 30}%)`; g.fillRect(x, 8 + Math.random() * 6, 5, h); g.fillStyle = "#e0b090"; g.fillRect(x + 1, 3 + Math.random() * 5, 3, 5); } }, true);
   TEX.windows = canvasTex(128, 256, (g, w, h) => { g.fillStyle = "#111318"; g.fillRect(0, 0, w, h); for (let y = 6; y < h; y += 14) for (let x = 6; x < w; x += 14) { if (Math.random() < 0.45) { g.fillStyle = Math.random() < 0.5 ? "#ffd58a" : "#bfe0ff"; g.globalAlpha = 0.5 + Math.random() * 0.5; g.fillRect(x, y, 8, 8); g.globalAlpha = 1; } } }, true);
   TEX.container = canvasTex(128, 64, (g, w, h) => { g.fillStyle = "#fff"; g.fillRect(0, 0, w, h); for (let x = 0; x < w; x += 8) { g.fillStyle = "rgba(0,0,0,0.25)"; g.fillRect(x, 0, 2, h); } });
@@ -880,7 +985,7 @@ function bankDrift() {
   drift.active = false;
   if (v > 50) { drift.total += v; drift.best = Math.max(drift.best, v); popup("+" + ar(v), v > 5000 ? "big" : ""); tone(880, 0.1, "triangle", 0.05); }
 }
-function breakDrift() { if (drift.active && drift.pts > 50) popup("اصطدمت! ضاعت النقاط", "bad"); drift.active = false; drift.pts = 0; }
+function breakDrift() { if (drift.active && drift.pts > 50) popup(T("اصطدمت! ضاعت النقاط"), "bad"); drift.active = false; drift.pts = 0; }
 
 // ---------------- profile ----------------
 const PROF = Object.assign({ coins: 800, car: "saqr", look: {}, ups: {}, races: 0, wins: 0, bestDrift: 0, bestLap: {}, stars: {} }, store.get("dk.profile", {}));
@@ -922,7 +1027,7 @@ function startRace(kind, ti) {
   // cars on the grid
   cars = [];
   const pdef = myCarDef(), myUps = upsOf(pdef.id);
-  me = newCar(pdef, carStats(pdef, myUps), lookOf(pdef), true, Q.hq); me.name = ($("nick").value.trim() || "أنت").slice(0, 12);
+  me = newCar(pdef, carStats(pdef, myUps), lookOf(pdef), true, Q.hq); me.name = ($("nick").value.trim() || T("أنت")).slice(0, 12);
   const nAI = kind === "race" ? 7 : 0, grid = [];
   for (let k = 0; k <= nAI; k++) grid.push(k);
   const meSlot = kind === "race" ? 4 : 0;
@@ -936,7 +1041,7 @@ function startRace(kind, ti) {
       const d = CARS[Math.floor(R() * CARS.length)], l = clamp(lvl + Math.round(R() * 2 - 1), 0, 4);
       // every model is driven to the same pace, so no single car runs away with every race
       c = newCar(d, carStats(d, { engine: l, tires: l, nitro: l, susp: l }), aiLook(d, R), false, Q.hq);
-      c.skill = 0.985 + R() * 0.03; c.pace = AI_PACE[d.id] || 1; c.aiOff = (R() - 0.5) * 1.2; c.wob = SETTINGS.diff === "easy" ? 0.05 : 0.015; c.name = names[k % names.length];
+      c.skill = 0.985 + R() * 0.03; c.pace = AI_PACE[d.id] || 1; c.aiOff = (R() - 0.5) * 1.2; c.wob = SETTINGS.diff === "easy" ? 0.05 : 0.015; c.name = T(names[k % names.length]);
     }
     const row = Math.floor(k / 2), side = k % 2 ? -1 : 1, i = (TR.N - 6 - row * 5) % TR.N, p = TR.P[i], n = TR.Nl[i];
     c.x = p.x + n.x * side * 3.2; c.z = p.z + n.z * side * 3.2; c.a = Math.atan2(TR.T[i].z, TR.T[i].x); c.idx = i; c.dist = -(TR.len - TR.S[i]);
@@ -950,7 +1055,7 @@ function startRace(kind, ti) {
   camA = me.a; mode = "race"; showScreen(null); $("hud").hidden = false; document.body.classList.toggle("driftmode", kind === "drift");
   $("lapBox").hidden = kind !== "race"; $("driftBox").hidden = false; $("posBox").hidden = kind !== "race";
   miniTrack = null; engineStart(); resize();
-  hint(kind === "race" ? "سباق " + ar(def.laps) + " لفات – خلك الأول!" : "تفحيط لمدة دقيقتين – كل ما طولت التفحيطة زاد المضاعف", 3500);
+  hint(kind === "race" ? T("سباق {n} لفات – خلك الأول!", { n: ar(def.laps) }) : T("تفحيط لمدة دقيقتين – كل ما طولت التفحيطة زاد المضاعف"), 3500);
 }
 const headLight = new THREE.SpotLight(0xfff2d0, 0, 90, 0.5, 0.5, 1.2);
 function finishCar(c) {
@@ -963,14 +1068,14 @@ function endRace() {
     const def = TRACKS[trackIdx]; let coins = 0, title = "", sub = "", stars = 0;
     if (gameMode === "race") {
       const place = me.place; coins = [900, 650, 480, 360, 280, 220, 180, 150][place - 1] + Math.round(drift.total / 25);
-      title = place === 1 ? "فزت بالسباق! 🏆" : "المركز " + ar(place); sub = "وقتك " + fmtT(me.finishT || raceT) + " – أحسن لفة " + fmtT(me.best);
+      title = place === 1 ? T("فزت بالسباق! 🏆") : T("المركز {n}", { n: ar(place) }); sub = T("وقتك {t} – أحسن لفة {b}", { t: fmtT(me.finishT || raceT), b: fmtT(me.best) });
       PROF.races++; if (place === 1) PROF.wins++;
       if (isFinite(me.best) && (!PROF.bestLap[def.id] || me.best < PROF.bestLap[def.id])) PROF.bestLap[def.id] = me.best;
       stars = place === 1 ? 3 : place <= 3 ? 2 : place <= 5 ? 1 : 0;
     } else {
       bankDrift(); const sc = drift.total; coins = Math.round(sc / 35) + 100; stars = sc >= 60000 ? 3 : sc >= 30000 ? 2 : sc >= 10000 ? 1 : 0;
-      title = stars ? "★".repeat(stars) + " تفحيط ممتاز!" : "خلص الوقت"; sub = "نقاطك " + ar(sc) + " – أطول تفحيطة " + ar(drift.best);
-      if (sc > PROF.bestDrift) { PROF.bestDrift = sc; sub += " – رقم قياسي جديد!"; }
+      title = stars ? T("{s} تفحيط ممتاز!", { s: "★".repeat(stars) }) : T("خلص الوقت"); sub = T("نقاطك {n} – أطول تفحيطة {b}", { n: ar(sc), b: ar(drift.best) });
+      if (sc > PROF.bestDrift) { PROF.bestDrift = sc; sub += T(" – رقم قياسي جديد!"); }
     }
     PROF.stars[def.id + gameMode] = Math.max(PROF.stars[def.id + gameMode] || 0, stars);
     PROF.coins += coins; saveProf(); setTimeout(() => offerDouble(coins), 600);
@@ -1058,7 +1163,7 @@ function update(dt) {
   if (countdown > 0) {
     const before = Math.ceil(countdown); countdown -= dt; const now = Math.ceil(countdown);
     if (now !== before && now > 0) { tone(440, 0.18, "square", 0.05); $("count").textContent = ar(now); $("count").hidden = false; }
-    if (countdown <= 0) { tone(880, 0.35, "square", 0.06); $("count").textContent = "انطلق!"; setTimeout(() => ($("count").hidden = true), 700); }
+    if (countdown <= 0) { tone(880, 0.35, "square", 0.06); $("count").textContent = T("انطلق!"); setTimeout(() => ($("count").hidden = true), 700); }
     // revving at the start line
     input.read(me, dt);
     return;
@@ -1076,7 +1181,7 @@ function update(dt) {
     c.dist += ds; c.lapT += dt;
     if (gameMode === "race" && !c.finished) {
       const lap = Math.floor(c.dist / TR.len);
-      if (lap > c.lap) { c.lap = lap; if (lap >= 1) { c.lastLap = c.lapT; c.best = Math.min(c.best, c.lapT); if (c === me && lap < TR.def.laps) { popup("لفة " + ar(lap + 1) + " – " + fmtT(c.lapT), ""); tone(990, 0.12, "triangle", 0.05); } } c.lapT = 0; if (lap >= TR.def.laps) finishCar(c); }
+      if (lap > c.lap) { c.lap = lap; if (lap >= 1) { c.lastLap = c.lapT; c.best = Math.min(c.best, c.lapT); if (c === me && lap < TR.def.laps) { popup(T("لفة {n} – {t}", { n: ar(lap + 1), t: fmtT(c.lapT) }), ""); tone(990, 0.12, "triangle", 0.05); } } c.lapT = 0; if (lap >= TR.def.laps) finishCar(c); }
     }
   }
   carsCollide(cars);
@@ -1095,7 +1200,7 @@ function frameTick(dt) {
 }
 
 // ---------------- camera ----------------
-let camA = 0;
+let camA = 0, camW = 0;
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 const _sunOff = new THREE.Vector3(40, 90, 30), _sv = new THREE.Vector3();
 const _sunView = new THREE.Matrix4().lookAt(_sunOff, new THREE.Vector3(), new THREE.Vector3(0, 1, 0)).invert(), _sunViewInv = _sunView.clone().invert();
@@ -1103,14 +1208,16 @@ _sunView.setPosition(0, 0, 0); _sunViewInv.setPosition(0, 0, 0);
 function updateCamera(dt) {
   const c = { x: me.rx, z: me.rz, a: me.ra, vx: me.vx, vz: me.vz, nitroOn: me.nitroOn, nitro: me.nitro }, sp = Math.hypot(c.vx, c.vz);
   // follow a mix of where the car points and where it is going, so drifts look wide
-  const velA = sp > 4 ? Math.atan2(c.vz, c.vx) : c.a; let mix = c.a; let dd = velA - c.a; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); mix = c.a + dd * 0.45;
-  let da = mix - camA; da = Math.atan2(Math.sin(da), Math.cos(da)); camA += da * (1 - Math.exp(-dt * 5));
-  const camMode = SETTINGS.cam % 3, dist = camMode === 1 ? 8.5 : 4.9, h = camMode === 1 ? 3.2 : 1.7;
+  const velA = sp > 4 ? Math.atan2(c.vz, c.vx) : c.a; let mix = c.a; let dd = velA - c.a; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); mix = c.a + dd * 0.3;
+  let da = mix - camA; da = Math.atan2(Math.sin(da), Math.cos(da));
+  // follow the heading quickly (was slow, so the world swung heavily after every turn); stable at any frame rate
+  camA += da * (1 - Math.exp(-dt * 10));
+  const camMode = SETTINGS.cam % 3, dist = camMode === 1 ? 7.5 : 4.3, h = camMode === 1 ? 2.8 : 1.55;
   if (camMode === 2) { // bonnet camera
     camPos.set(c.x + Math.cos(c.a) * 0.4, 1.15, c.z + Math.sin(c.a) * 0.4); camLook.set(c.x + Math.cos(c.a) * 20, 1.0, c.z + Math.sin(c.a) * 20);
     camera.position.copy(camPos);
   } else {
-    const back = dist + sp * 0.012;
+    const back = dist + sp * 0.008;
     const tx = c.x - Math.cos(camA) * back, tz = c.z - Math.sin(camA) * back;
     camPos.set(tx, h + sp * 0.006, tz);
     camera.position.lerp(camPos, 1 - Math.exp(-dt * 28)); // stays tight behind the car, even at full speed
@@ -1120,7 +1227,7 @@ function updateCamera(dt) {
   camera.position.x += (Math.random() - 0.5) * shake * 0.3; camera.position.y += (Math.random() - 0.5) * shake * 0.2;
   camera.lookAt(camLook);
   const boost = c.nitroOn && c.nitro > 0;
-  camera.fov = lerp(camera.fov, 55 + Math.min(8, sp * 0.14) + (boost ? 6 : 0), 1 - Math.exp(-dt * 4)); camera.updateProjectionMatrix();
+  camera.fov = lerp(camera.fov, 52 + Math.min(7, sp * 0.12) + (boost ? 5 : 0), 1 - Math.exp(-dt * 4)); camera.updateProjectionMatrix();
   // the shadow camera follows the car in whole shadow-texel steps, so shadow edges don't crawl or shimmer
   { const tex = (sc.right - sc.left) / sun.shadow.mapSize.x; _sv.set(c.x, 0, c.z).applyMatrix4(_sunView); _sv.x = Math.round(_sv.x / tex) * tex; _sv.y = Math.round(_sv.y / tex) * tex; _sv.applyMatrix4(_sunViewInv);
     sun.target.position.copy(_sv); sun.position.copy(_sv).add(_sunOff); }
@@ -1174,8 +1281,8 @@ function hud(dt, sp) {
   if (gameMode === "race") {
     $("pos").textContent = ar(me.place); $("posN").textContent = "/" + ar(cars.length);
     $("lap").textContent = ar(Math.min(TR.def.laps, me.lap + 1)) + "/" + ar(TR.def.laps);
-    $("time").textContent = fmtT(raceT); $("bestLap").textContent = isFinite(me.best) ? "أحسن لفة " + fmtT(me.best) : "";
-  } else { $("time").textContent = fmtT(Math.max(0, DRIFT_TIME - raceT)); $("bestLap").textContent = "أحسن تفحيطة " + ar(drift.best); }
+    $("time").textContent = fmtT(raceT); $("bestLap").textContent = isFinite(me.best) ? T("أحسن لفة {t}", { t: fmtT(me.best) }) : "";
+  } else { $("time").textContent = fmtT(Math.max(0, DRIFT_TIME - raceT)); $("bestLap").textContent = T("أحسن تفحيطة {n}", { n: ar(drift.best) }); }
   drawMini();
   $("speedLines").style.opacity = clamp((sp - 30) / 30, 0, 0.6) + (me.nitroOn && me.nitro > 0 ? 0.3 : 0);
 }
@@ -1312,21 +1419,21 @@ function garageUi() {
   const c = CARS[gar.sel], st = carStats(c, upsOf(c.id)), look = lookOf(c);
   garageCar(c.id);
   $("coins").textContent = ar(PROF.coins);
-  $("carName").textContent = c.name; $("carDesc").textContent = c.desc;
+  $("carName").textContent = T(c.name); $("carDesc").textContent = T(c.desc);
   const bars = $("carBars"); bars.innerHTML = "";
-  for (const [label, v] of [["السرعة", st.max / 85], ["التسارع", st.acc / 17], ["الثبات", st.grip / 10], ["التفحيط", st.drift / 1.5]]) {
+  for (const [label, v] of [[T("السرعة"), st.max / 85], [T("التسارع"), st.acc / 17], [T("الثبات"), st.grip / 10], [T("التفحيط"), st.drift / 1.5]]) {
     const r = document.createElement("div"), l = document.createElement("span"), b = document.createElement("b"), i = document.createElement("i");
     l.textContent = label; i.style.width = clamp(v, 0.05, 1) * 100 + "%"; b.append(i); r.append(l, b); bars.append(r);
   }
-  const act = $("carAct"); act.textContent = PROF.car === c.id ? "سيارتك ✓" : "اختر هذي السيارة"; act.className = "btn" + (PROF.car === c.id ? " alt" : "");
+  const act = $("carAct"); act.textContent = PROF.car === c.id ? T("سيارتك ✓") : T("اختر هذي السيارة"); act.className = "btn" + (PROF.car === c.id ? " alt" : "");
   buildLookUi(c, look);
   // upgrades (earned with coins from races)
   const ul = $("ups"); ul.innerHTML = ""; const u = upsOf(c.id);
   for (const k of ["engine", "tires", "nitro", "susp"]) {
     const U = UPG[k], lv = u[k], r = document.createElement("div"), n = document.createElement("span"), dots = document.createElement("em"), b = document.createElement("button");
-    n.textContent = U.name; for (let i = 0; i < 4; i++) { const d = document.createElement("i"); if (i < lv) d.className = "on"; dots.append(d); }
-    b.type = "button"; b.className = "upb"; b.textContent = lv >= 4 ? "كامل" : ar(U.cost[lv]) + " 🪙"; b.disabled = lv >= 4;
-    b.addEventListener("click", () => { if (PROF.coins < U.cost[lv]) { toast("ما عندك فلوس كفاية، العب وجمّع"); return; } PROF.coins -= U.cost[lv]; u[k]++; saveProf(); garageUi(); tone(660, 0.1, "triangle", 0.05); setTimeout(() => tone(990, 0.15, "triangle", 0.05), 100); });
+    n.textContent = T(U.name); for (let i = 0; i < 4; i++) { const d = document.createElement("i"); if (i < lv) d.className = "on"; dots.append(d); }
+    b.type = "button"; b.className = "upb"; b.textContent = lv >= 4 ? T("كامل") : ar(U.cost[lv]) + " 🪙"; b.disabled = lv >= 4;
+    b.addEventListener("click", () => { if (PROF.coins < U.cost[lv]) { toast(T("ما عندك فلوس كفاية، العب وجمّع")); return; } PROF.coins -= U.cost[lv]; u[k]++; saveProf(); garageUi(); tone(660, 0.1, "triangle", 0.05); setTimeout(() => tone(990, 0.15, "triangle", 0.05), 100); });
     r.append(n, dots, b); ul.append(r);
   }
   $("garNote").textContent = "";
@@ -1334,33 +1441,33 @@ function garageUi() {
 // customisation: everything is open, pick any colour or part
 function buildLookUi(c, look) {
   // customising a car makes it the car you race with
-  const pickMe = () => { if (PROF.car !== c.id) { PROF.car = c.id; const act = $("carAct"); act.textContent = "سيارتك ✓"; act.className = "btn alt"; } };
+  const pickMe = () => { if (PROF.car !== c.id) { PROF.car = c.id; const act = $("carAct"); act.textContent = T("سيارتك ✓"); act.className = "btn alt"; } };
   const set = (k, v) => { look[k] = v; pickMe(); saveProf(); gar.car.userData.setLook(look); buildLookUi(c, look); tone(700, 0.04, "triangle", 0.03); };
-  const title = (t) => { const p = document.createElement("p"); p.className = "swt"; p.textContent = t; return p; };
+  const title = (t) => { const p = document.createElement("p"); p.className = "swt"; p.textContent = T(t); return p; };
   const colors = (k, list) => {
     const row = document.createElement("div"); row.className = "swl";
     for (const col of list) { const b = document.createElement("button"); b.type = "button"; b.className = "sw" + (look[k] === col ? " on" : ""); b.style.background = col; b.setAttribute("aria-label", col); b.addEventListener("click", () => set(k, col)); row.append(b); }
-    const lab = document.createElement("label"); lab.className = "cin" + (list.includes(look[k]) ? "" : " on"); lab.title = "لون مخصص"; lab.setAttribute("aria-label", "لون مخصص");
+    const lab = document.createElement("label"); lab.className = "cin" + (list.includes(look[k]) ? "" : " on"); lab.title = T("لون مخصص"); lab.setAttribute("aria-label", T("لون مخصص"));
     const inp = document.createElement("input"); inp.type = "color"; inp.value = /^#[0-9a-f]{6}$/i.test(look[k]) ? look[k] : "#ffffff";
     inp.addEventListener("input", () => { look[k] = inp.value; pickMe(); saveProf(); gar.car.userData.setLook(look); }); inp.addEventListener("change", () => set(k, inp.value));
     lab.append(inp); row.append(lab); return row;
   };
   const chips = (k, opts) => {
     const row = document.createElement("div"); row.className = "chiprow";
-    for (const [v, label] of Object.entries(opts)) { const b = document.createElement("button"); b.type = "button"; const val = typeof look[k] === "number" ? +v : v; b.className = "chip" + (look[k] === val ? " on" : ""); b.textContent = label; b.addEventListener("click", () => set(k, val)); row.append(b); }
+    for (const [v, label] of Object.entries(opts)) { const b = document.createElement("button"); b.type = "button"; const val = typeof look[k] === "number" ? +v : v; b.className = "chip" + (look[k] === val ? " on" : ""); b.textContent = T(label); b.addEventListener("click", () => set(k, val)); row.append(b); }
     return row;
   };
   const P = $("gt-paint"); P.innerHTML = "";
   P.append(title("لون السيارة"), colors("paint", PALETTE), title("اللمعة"), chips("finish", FINISH), title("الرسمة"), chips("decal", DECALS));
   if (look.decal !== "none") P.append(title("لون الرسمة"), colors("c2", PALETTE));
-  if (look.decal === "number" || look.decal === "race") { const n = document.createElement("input"); n.type = "number"; n.min = 0; n.max = 99; n.value = look.num; n.className = "numin"; n.setAttribute("aria-label", "رقم السيارة"); n.addEventListener("change", () => set("num", clamp(Math.round(+n.value || 0), 0, 99))); P.append(title("رقم السيارة"), n); }
+  if (look.decal === "number" || look.decal === "race") { const n = document.createElement("input"); n.type = "number"; n.min = 0; n.max = 99; n.value = look.num; n.className = "numin"; n.setAttribute("aria-label", T("رقم السيارة")); n.addEventListener("change", () => set("num", clamp(Math.round(+n.value || 0), 0, 99))); P.append(title("رقم السيارة"), n); }
   P.append(title("السقف"), chips("roof", ROOFS));
   if (look.roof === "c2" && look.decal === "none") P.append(title("لون السقف"), colors("c2", PALETTE));
   P.append(title("تظليل الزجاج"), chips("tint", Object.fromEntries(TINTS.map((t, i) => [i, t]))));
   const Rm = $("gt-rims"); Rm.innerHTML = "";
   Rm.append(title("شكل الجنوط"), chips("rim", Object.fromEntries(RIM_STYLES.map((t, i) => [i, t]))), title("لون الجنوط"), colors("rimC", ["#c9ccd1", "#e8e8e8", "#9ea3a8", "#26272b", "#1b1b1d", "#d4af37", "#b87333", "#c81e1e", "#1f6fe0", "#f2c230", "#ffffff"]), title("لون الكاليبر"), colors("caliper", ["#d42020", "#ffd400", "#1f6fe0", "#3fd98a", "#ff5a1f", "#26272b", "#e8e8e8"]));
   const K = $("gt-kit"); K.innerHTML = "";
-  const h = document.createElement("input"); h.type = "range"; h.min = 0; h.max = 1; h.step = 0.1; h.value = look.height || 0; h.className = "rng"; h.setAttribute("aria-label", "تنزيل السيارة");
+  const h = document.createElement("input"); h.type = "range"; h.min = 0; h.max = 1; h.step = 0.1; h.value = look.height || 0; h.className = "rng"; h.setAttribute("aria-label", T("تنزيل السيارة"));
   h.addEventListener("input", () => { look.height = +h.value; pickMe(); saveProf(); gar.car.userData.setLook(look); });
   K.append(title("الجناح"), chips("spoiler", SPOILERS), title("تنزيل السيارة"), h, title("نيون تحت السيارة"), chips("neon", Object.fromEntries(NEONS.map((n) => [n, n ? "●" : "بدون"]))), title("لون دخان التفحيط"), colors("smoke", SMOKES));
   // colour the neon chips
@@ -1379,13 +1486,13 @@ function tracksUi() {
   TRACKS.forEach((t, i) => {
     const b = document.createElement("button"); b.type = "button"; b.className = "tcard" + (i === pickTrack ? " on" : "") + (t.night ? " night" : t.dusk ? " dusk" : "");
     const n = document.createElement("b"), d = document.createElement("span"), s = document.createElement("i");
-    n.textContent = t.name; d.textContent = t.desc; const stars = PROF.stars[t.id + pickMode] || 0; s.textContent = "★".repeat(stars) + "☆".repeat(3 - stars);
-    const best = PROF.bestLap[t.id]; if (best && pickMode === "race") { const bl = document.createElement("small"); bl.textContent = "أحسن لفة " + fmtT(best); b.append(n, d, s, bl); } else b.append(n, d, s);
+    n.textContent = T(t.name); d.textContent = T(t.desc); const stars = PROF.stars[t.id + pickMode] || 0; s.textContent = "★".repeat(stars) + "☆".repeat(3 - stars);
+    const best = PROF.bestLap[t.id]; if (best && pickMode === "race") { const bl = document.createElement("small"); bl.textContent = T("أحسن لفة {t}", { t: fmtT(best) }); b.append(n, d, s, bl); } else b.append(n, d, s);
     b.addEventListener("click", () => { pickTrack = i; tracksUi(); });
     el.append(b);
   });
   document.querySelectorAll(".mpick button").forEach((x) => x.classList.toggle("on", x.dataset.m === pickMode));
-  $("modeDesc").textContent = pickMode === "race" ? "سباق ضد ٧ سواقين بنفس مستوى سيارتك – السباق متقارب لين النهاية" : "دقيقتين تفحيط – جمّع نقاط وكومبو";
+  $("modeDesc").textContent = pickMode === "race" ? T("سباق ضد ٧ سواقين بنفس مستوى سيارتك – السباق متقارب لين النهاية") : T("دقيقتين تفحيط – جمّع نقاط وكومبو");
   $("diffPick").hidden = pickMode !== "race";
   document.querySelectorAll("#diffPick button").forEach((x) => x.classList.toggle("on", x.dataset.d === SETTINGS.diff));
 }
@@ -1407,12 +1514,14 @@ function settingsUi() {
   document.querySelectorAll("[data-q]").forEach((b) => b.classList.toggle("on", b.dataset.q === SETTINGS.quality));
   document.querySelectorAll("[data-ctl]").forEach((b) => b.classList.toggle("on", b.dataset.ctl === SETTINGS.ctl));
   $("soundOn").checked = SETTINGS.sound;
+  document.querySelectorAll("[data-lang]").forEach((b) => b.classList.toggle("on", b.dataset.lang === LANG));
 }
 $("setBtn").addEventListener("click", () => { settingsUi(); $("settings").hidden = false; });
 $("setPause").addEventListener("click", () => { settingsUi(); $("settings").hidden = false; });
 document.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("click", () => { SETTINGS.quality = b.dataset.q; saveSettings(); applyQuality(); settingsUi(); }));
 document.querySelectorAll("[data-ctl]").forEach((b) => b.addEventListener("click", () => { SETTINGS.ctl = b.dataset.ctl; saveSettings(); settingsUi(); document.body.classList.toggle("tilt", SETTINGS.ctl === "tilt"); document.body.classList.toggle("wheelctl", SETTINGS.ctl === "wheel"); if (SETTINGS.ctl === "tilt" && window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission().catch(() => {}); }));
 $("soundOn").addEventListener("change", (e) => { SETTINGS.sound = e.target.checked; saveSettings(); if (!SETTINGS.sound) engineStop(); });
+document.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => { if (b.dataset.lang === LANG) return; SETTINGS.lang = b.dataset.lang; saveSettings(); location.reload(); }));
 $("setDone").addEventListener("click", () => { $("settings").hidden = true; });
 $("nick").value = store.get("dk.nick", ""); $("nick").addEventListener("change", () => store.set("dk.nick", $("nick").value.trim()));
 async function goFullscreen() {
@@ -1424,7 +1533,7 @@ async function goFullscreen() {
 if (IS_TOUCH) { const first = () => { goFullscreen(); }; window.addEventListener("pointerup", first, { once: true }); document.addEventListener("fullscreenchange", () => { if (document.fullscreenElement) { try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} } }); }
 document.body.classList.toggle("touch", IS_TOUCH); document.body.classList.toggle("tilt", SETTINGS.ctl === "tilt"); document.body.classList.toggle("wheelctl", SETTINGS.ctl === "wheel");
 // ---------------- boot ----------------
-applyQuality(); buildGarage(); gar.sel = Math.max(0, CARS.findIndex((c) => c.id === PROF.car)); showScreen("garage"); garageUi();
+localizePage(); applyQuality(); buildGarage(); gar.sel = Math.max(0, CARS.findIndex((c) => c.id === PROF.car)); showScreen("garage"); garageUi();
 requestAnimationFrame(frame); setTimeout(offerCoins, 2500);
 window.__dk = { get me() { return me; }, get cars() { return cars; }, get tr() { return TR; }, get drift() { return drift; }, start: startRace, get info() { return renderer.info.render; }, get adapt() { return ADAPT; }, sim(n) { for (let i = 0; i < n; i++) { for (const c of cars) { c.px = c.x; c.pz = c.z; c.pa = c.a; c.pspin = c.spin; } update(STEP); } }, set hits(v) {}, };
 
@@ -1487,7 +1596,7 @@ function playerId() {
   if (!/^[0-9a-f-]{36}$/.test(id)) { id = (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16))); store.set("dk.pid", id); }
   return id;
 }
-function playerName() { const n = ($("nick").value || "").trim(); if (n && n !== "أنت") return n.slice(0, 16); let g = store.get("dk.guest", ""); if (!g) { g = "سواق " + (1000 + Math.floor(Math.random() * 9000)).toLocaleString("ar-EG", { useGrouping: false }); store.set("dk.guest", g); } return g; }
+function playerName() { const n = ($("nick").value || "").trim(); if (n && n !== "أنت" && n !== "You") return n.slice(0, 16); let g = store.get("dk.guest", ""); if (!g) { g = T("سواق {n}", { n: (1000 + Math.floor(Math.random() * 9000)).toLocaleString(LANG === "en" ? "en-US" : "ar-EG", { useGrouping: false }) }); store.set("dk.guest", g); } return g; }
 function dayKey(d = new Date()) { const t = new Date(d.getTime() + 3 * 3600e3); return t.toISOString().slice(0, 10); } // Riyadh day
 function weekKey(d = new Date()) {
   const t = new Date(d.getTime() + 3 * 3600e3), x = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()));
@@ -1496,17 +1605,17 @@ function weekKey(d = new Date()) {
   return y + "-W" + String(w).padStart(2, "0");
 }
 const seedOf = (s) => { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
-const trackName = (id) => (TRACKS.find((t) => t.id === id) || TRACKS[0]).name;
+const trackName = (id) => T((TRACKS.find((t) => t.id === id) || TRACKS[0]).name);
 
 // ---- daily tasks: three a day, the same for everyone on that date ----
 const DAILY_POOL = [
-  (R) => ({ id: "win", text: "فز بسباق واحد", reward: 350 }),
-  (R) => { const t = TRACK_IDS[Math.floor(R() * 3)]; return { id: "podium", track: t, text: "خلّص في أول ٣ في " + trackName(t), reward: 280 }; },
-  (R) => { const n = [3000, 5000, 8000][Math.floor(R() * 3)]; return { id: "drift1", n, text: "تفحيطة وحدة فوق " + ar(n) + " نقطة", reward: 260 }; },
-  (R) => { const n = [20000, 30000, 40000][Math.floor(R() * 3)]; return { id: "driftT", n, text: "اجمع " + ar(n) + " نقطة في جولة تفحيط", reward: 320 }; },
-  (R) => { const t = TRACK_IDS[Math.floor(R() * 3)]; return { id: "lap", track: t, n: LAP_TARGET[t], text: "لفة أسرع من " + fmtT(LAP_TARGET[t]) + " في " + trackName(t), reward: 300 }; },
-  (R) => ({ id: "nitro", n: 12, text: "استخدم النيترو ١٢ ثانية في سباق", reward: 200 }),
-  (R) => { const c = CARS[Math.floor(R() * CARS.length)]; return { id: "car", car: c.id, text: "خلّص سباق بسيارة " + c.name, reward: 220 }; },
+  (R) => ({ id: "win", text: T("فز بسباق واحد"), reward: 350 }),
+  (R) => { const t = TRACK_IDS[Math.floor(R() * 3)]; return { id: "podium", track: t, text: T("خلّص في أول ٣ في {t}", { t: trackName(t) }), reward: 280 }; },
+  (R) => { const n = [3000, 5000, 8000][Math.floor(R() * 3)]; return { id: "drift1", n, text: T("تفحيطة وحدة فوق {n} نقطة", { n: ar(n) }), reward: 260 }; },
+  (R) => { const n = [20000, 30000, 40000][Math.floor(R() * 3)]; return { id: "driftT", n, text: T("اجمع {n} نقطة في جولة تفحيط", { n: ar(n) }), reward: 320 }; },
+  (R) => { const t = TRACK_IDS[Math.floor(R() * 3)]; return { id: "lap", track: t, n: LAP_TARGET[t], text: T("لفة أسرع من {t} في {k}", { t: fmtT(LAP_TARGET[t]), k: trackName(t) }), reward: 300 }; },
+  (R) => ({ id: "nitro", n: 12, text: T("استخدم النيترو ١٢ ثانية في سباق"), reward: 200 }),
+  (R) => { const c = CARS[Math.floor(R() * CARS.length)]; return { id: "car", car: c.id, text: T("خلّص سباق بسيارة {c}", { c: T(c.name) }), reward: 220 }; },
 ];
 function dailyToday() {
   const key = dayKey(), R = rng(seedOf("day" + key)), picks = [], used = new Set();
@@ -1520,7 +1629,7 @@ function weeklyNow() {
   const target = kind === "lap" ? LAP_TARGET[track] - 2 : [35000, 45000, 55000][Math.floor(R() * 3)];
   if (!PROF.weekly || PROF.weekly.key !== wk) { PROF.weekly = { key: wk, best: null, claimed: false }; saveProf(); }
   return { wk, track, kind, target, reward: 1200,
-    text: kind === "lap" ? "أسرع لفة في " + trackName(track) + " – الهدف أقل من " + fmtT(target) : "أعلى نقاط تفحيط في " + trackName(track) + " – الهدف " + ar(target) };
+    text: kind === "lap" ? T("أسرع لفة في {k} – الهدف أقل من {t}", { k: trackName(track), t: fmtT(target) }) : T("أعلى نقاط تفحيط في {k} – الهدف {n}", { k: trackName(track), n: ar(target) }) };
 }
 function taskDone(t, ev) {
   if (t.id === "win") return ev.mode === "race" && ev.place === 1;
@@ -1542,7 +1651,7 @@ function challengeEvent(ev) {
     if (PROF.weekly.best == null || (W.kind === "lap" ? v < PROF.weekly.best : v > PROF.weekly.best)) PROF.weekly.best = v;
   }
   saveProf(); chalBadge();
-  if (fresh.length) setTimeout(() => popup("✓ " + fresh[0] + " – استلم جائزتك من التحديات", "big"), 900);
+  if (fresh.length) setTimeout(() => popup(T("✓ {t} – استلم جائزتك من التحديات", { t: fresh[0] }), "big"), 900);
   // the board keeps your best lap per track (races) and your best drift session per track
   if (ev.mode === "race" && isFinite(ev.best)) lbSubmit("lap", ev.track, ev.best);
   if (ev.mode === "drift" && ev.driftTotal > 0) lbSubmit("drift", ev.track, ev.driftTotal);
@@ -1565,7 +1674,7 @@ async function lbSubmit(kind, track, value) {
     await sb("rpc/dk_submit", { p_player: playerId(), p_name: playerName(), p_kind: kind, p_track: track, p_car: PROF.car, p_value: v, p_week: weekKey() });
     const rank = await lbRank(kind, track, weekKey());
     LB.last = { kind, track, rank };
-    const el = $("resRank"); if (el && mode === "results") { el.hidden = false; el.textContent = rank ? "🏆 ترتيبك هذا الأسبوع في " + trackName(track) + ": #" + ar(rank) : "🏆 انحفظ رقمك في لوحة الصدارة"; }
+    const el = $("resRank"); if (el && mode === "results") { el.hidden = false; el.textContent = rank ? T("🏆 ترتيبك هذا الأسبوع في {k}: #{n}", { k: trackName(track), n: ar(rank) }) : T("🏆 انحفظ رقمك في لوحة الصدارة"); }
   } catch (e) { /* offline: try again next race */ }
 }
 async function lbTop(kind, track, period, limit = 50) {
@@ -1583,38 +1692,38 @@ function chalRender() {
     const r = document.createElement("div"); r.className = "crow " + state;
     const t = document.createElement("div"), b = document.createElement("b"), s = document.createElement("small"); b.textContent = text; s.textContent = sub; t.append(b, s);
     const a = document.createElement("button"); a.type = "button"; a.className = "cbtn";
-    a.textContent = state === "claimed" ? "✓ استلمت" : state === "ready" ? "استلم " + ar(reward) + " 🪙" : ar(reward) + " 🪙"; a.disabled = state !== "ready";
+    a.textContent = state === "claimed" ? T("✓ استلمت") : state === "ready" ? T("استلم {n} 🪙", { n: ar(reward) }) : ar(reward) + " 🪙"; a.disabled = state !== "ready";
     if (state === "ready") a.addEventListener("click", onClaim);
     r.append(t, a); box.append(r);
   };
   if (chalTab === "daily") {
     const d = dailyToday();
     d.forEach((t, i) => { const done = PROF.daily.done.includes(i), claimed = PROF.daily.claimed.includes(i);
-      row(t.text, done ? "خلّصته 👏" : "يتجدد بكرة", claimed ? "claimed" : done ? "ready" : "todo", t.reward, () => { PROF.daily.claimed.push(i); PROF.coins += t.reward; saveProf(); $("coins").textContent = ar(PROF.coins); tone(880, 0.12, "triangle", 0.06); chalBadge(); chalRender(); }); });
-    const p = document.createElement("p"); p.className = "cnote"; p.textContent = "التحديات تتغير كل يوم الساعة ١٢ بالليل."; box.append(p);
+      row(t.text, done ? T("خلّصته 👏") : T("يتجدد بكرة"), claimed ? "claimed" : done ? "ready" : "todo", t.reward, () => { PROF.daily.claimed.push(i); PROF.coins += t.reward; saveProf(); $("coins").textContent = ar(PROF.coins); tone(880, 0.12, "triangle", 0.06); chalBadge(); chalRender(); }); });
+    const p = document.createElement("p"); p.className = "cnote"; p.textContent = T("التحديات تتغير كل يوم الساعة ١٢ بالليل."); box.append(p);
   } else if (chalTab === "weekly") {
     const W = weeklyNow(), b = PROF.weekly.best, hit = weeklyHit(W);
-    row(W.text, b == null ? "ما لعبته هذا الأسبوع" : "أحسن نتيجة لك: " + (W.kind === "lap" ? fmtT(b) : ar(Math.round(b))), PROF.weekly.claimed ? "claimed" : hit ? "ready" : "todo", W.reward, () => { PROF.weekly.claimed = true; PROF.coins += W.reward; saveProf(); $("coins").textContent = ar(PROF.coins); tone(880, 0.12, "triangle", 0.06); chalBadge(); chalRender(); });
-    const go = document.createElement("button"); go.type = "button"; go.className = "btn"; go.textContent = "العب التحدي ▶";
+    row(W.text, b == null ? T("ما لعبته هذا الأسبوع") : T("أحسن نتيجة لك: {v}", { v: W.kind === "lap" ? fmtT(b) : ar(Math.round(b)) }), PROF.weekly.claimed ? "claimed" : hit ? "ready" : "todo", W.reward, () => { PROF.weekly.claimed = true; PROF.coins += W.reward; saveProf(); $("coins").textContent = ar(PROF.coins); tone(880, 0.12, "triangle", 0.06); chalBadge(); chalRender(); });
+    const go = document.createElement("button"); go.type = "button"; go.className = "btn"; go.textContent = T("العب التحدي ▶");
     go.addEventListener("click", () => { $("chal").hidden = true; audio(); goFullscreen(); PROF.car = CARS[gar.sel].id; saveProf(); startRace(W.kind === "lap" ? "race" : "drift", TRACK_IDS.indexOf(W.track)); });
     box.append(go);
-    const p = document.createElement("p"); p.className = "cnote"; p.textContent = "التحدي يتغير كل أسبوع. نتيجتك تدخل لوحة الصدارة تلقائياً."; box.append(p);
+    const p = document.createElement("p"); p.className = "cnote"; p.textContent = T("التحدي يتغير كل أسبوع. نتيجتك تدخل لوحة الصدارة تلقائياً."); box.append(p);
   } else {
     const ctl = document.createElement("div"); ctl.className = "lbctl";
-    const seg = (key, opts) => { const s = document.createElement("div"); s.className = "chiprow"; for (const [v, l] of opts) { const b = document.createElement("button"); b.type = "button"; b.className = "chip" + (lbSel[key] === v ? " on" : ""); b.textContent = l; b.addEventListener("click", () => { lbSel[key] = v; chalRender(); }); s.append(b); } return s; };
+    const seg = (key, opts) => { const s = document.createElement("div"); s.className = "chiprow"; for (const [v, l] of opts) { const b = document.createElement("button"); b.type = "button"; b.className = "chip" + (lbSel[key] === v ? " on" : ""); b.textContent = T(l); b.addEventListener("click", () => { lbSel[key] = v; chalRender(); }); s.append(b); } return s; };
     ctl.append(seg("kind", [["lap", "أسرع لفة"], ["drift", "التفحيط"]]), seg("track", TRACKS.map((t) => [t.id, t.name])), seg("period", [["week", "هذا الأسبوع"], ["all", "كل الأوقات"]]));
     box.append(ctl);
     const list = document.createElement("div"); list.className = "lblist"; box.append(list);
-    if (!SB_ON) { list.innerHTML = '<p class="cnote">لوحة الصدارة الأونلاين بتشتغل قريب.</p>'; return; }
-    list.innerHTML = '<p class="cnote">جاري التحميل…</p>';
+    if (!SB_ON) { list.innerHTML = '<p class="cnote">' + T("لوحة الصدارة الأونلاين بتشتغل قريب.") + '</p>'; return; }
+    list.innerHTML = '<p class="cnote">' + T("جاري التحميل…") + '</p>';
     const sel = { ...lbSel };
     lbTop(sel.kind, sel.track, sel.period === "week" ? weekKey() : "all").then((rows) => {
       if (JSON.stringify(sel) !== JSON.stringify(lbSel)) return; list.innerHTML = "";
-      if (!rows.length) { list.innerHTML = '<p class="cnote">ما فيه أحد هنا للحين. كن الأول! 🏁</p>'; return; }
+      if (!rows.length) { list.innerHTML = '<p class="cnote">' + T("ما فيه أحد هنا للحين. كن الأول! 🏁") + '</p>'; return; }
       const me2 = playerId();
       rows.forEach((r, i) => { const d = document.createElement("div"); d.className = "lbrow" + (r.player_id === me2 ? " me" : ""); const a = document.createElement("b"), n = document.createElement("span"), c = document.createElement("small"), v = document.createElement("i");
-        a.textContent = i < 3 ? ["🥇", "🥈", "🥉"][i] : ar(i + 1); n.textContent = r.name; c.textContent = (CARS.find((x) => x.id === r.car) || {}).name || ""; v.textContent = sel.kind === "lap" ? fmtT(+r.value) : ar(Math.round(+r.value)); d.append(a, n, c, v); list.append(d); });
-    }).catch(() => { list.innerHTML = '<p class="cnote">ما قدرنا نجيب اللوحة. تأكد من النت وحاول مرة ثانية.</p>'; });
+        a.textContent = i < 3 ? ["🥇", "🥈", "🥉"][i] : ar(i + 1); n.textContent = r.name; c.textContent = T((CARS.find((x) => x.id === r.car) || {}).name || ""); v.textContent = sel.kind === "lap" ? fmtT(+r.value) : ar(Math.round(+r.value)); d.append(a, n, c, v); list.append(d); });
+    }).catch(() => { list.innerHTML = '<p class="cnote">' + T("ما قدرنا نجيب اللوحة. تأكد من النت وحاول مرة ثانية.") + '</p>'; });
   }
 }
 $("chalBtn").addEventListener("click", () => { tone(600, 0.05, "triangle", 0.03); chalOpen(); });

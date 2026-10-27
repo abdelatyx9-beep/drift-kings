@@ -36,7 +36,7 @@ button { font-family: inherit; }
 .btn.buy { background: linear-gradient(180deg, #7ff0b8, var(--ok)); color: #04140b; box-shadow: 0 6px 20px rgba(63,217,138,.3); }
 .btn:focus-visible, .sw:focus-visible, .tcard:focus-visible, .ctl:focus-visible { outline: 3px solid var(--cy); outline-offset: 2px; }
 /* ---------- screens ---------- */
-.screen { position: absolute; inset: 0; direction: rtl; pointer-events: none; padding: calc(10px + env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px)); box-sizing: border-box; }
+.screen { position: absolute; inset: 0; pointer-events: none; padding: calc(10px + env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px)); box-sizing: border-box; }
 .screen > * { pointer-events: auto; }
 .gtop { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
 .logo { font-family: var(--fd); font-weight: 800; font-size: 28px; line-height: 1; letter-spacing: .01em; background: linear-gradient(90deg, var(--hot2), var(--pink)); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 10px rgba(255,63,138,.35)); white-space: nowrap; }
@@ -87,7 +87,7 @@ button { font-family: inherit; }
 .mpick button.on { color: #1a0e00; background: linear-gradient(180deg, var(--hot2), var(--hot)); border-color: transparent; }
 .mdesc { margin: 0; text-align: center; font-size: 13px; color: var(--dim); }
 .tlist { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.tcard { display: grid; gap: 3px; text-align: right; padding: 12px; border-radius: 12px; border: 1.5px solid var(--line); cursor: pointer; color: var(--txt); background: linear-gradient(160deg, rgba(90,140,70,.55), rgba(20,30,20,.9)); min-height: 88px; }
+.tcard { display: grid; gap: 3px; text-align: start; padding: 12px; border-radius: 12px; border: 1.5px solid var(--line); cursor: pointer; color: var(--txt); background: linear-gradient(160deg, rgba(90,140,70,.55), rgba(20,30,20,.9)); min-height: 88px; }
 .tcard.night { background: linear-gradient(160deg, rgba(60,50,140,.6), rgba(10,10,30,.92)); }
 .tcard.dusk { background: linear-gradient(160deg, rgba(200,110,60,.55), rgba(40,20,20,.9)); }
 .tcard.on { border-color: var(--hot); box-shadow: 0 0 0 2px var(--hot); }
@@ -120,10 +120,10 @@ button { font-family: inherit; }
 .rrank { margin: 2px 0 0; font-family: var(--fd); font-weight: 700; color: #ffd7a8; }
 .rcoins { font-family: var(--fd); font-weight: 800; font-size: 26px; color: var(--hot2); }
 .rtable { display: grid; gap: 3px; max-height: 32vh; overflow-y: auto; }
-.rtable div { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; padding: 5px 10px; border-radius: 8px; background: rgba(255,255,255,.04); font-size: 14px; text-align: right; }
+.rtable div { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; padding: 5px 10px; border-radius: 8px; background: rgba(255,255,255,.04); font-size: 14px; text-align: start; }
 .rtable div.me { background: rgba(255,122,26,.18); color: #fff; } .rtable b { font-family: var(--fd); } .rtable i { font-style: normal; font-variant-numeric: tabular-nums; color: var(--dim); }
 /* ---------- HUD ---------- */
-.hud { position: absolute; inset: 0; pointer-events: none; direction: rtl; }
+.hud { position: absolute; inset: 0; pointer-events: none; }
 .hud > * { position: absolute; }
 .speedlines { inset: 0; opacity: 0; background: repeating-conic-gradient(from 0deg at 50% 55%, rgba(255,255,255,.0) 0deg 4deg, rgba(255,255,255,.07) 4deg 4.6deg); -webkit-mask: radial-gradient(ellipse at 50% 55%, transparent 30%, #000 75%); mask: radial-gradient(ellipse at 50% 55%, transparent 30%, #000 75%); transition: opacity .2s; }
 .htl { top: calc(10px + env(safe-area-inset-top, 0px)); right: max(14px, env(safe-area-inset-right, 0px)); display: grid; gap: 4px; justify-items: start; }
@@ -176,7 +176,7 @@ body.wheelctl.touch .dash { left: calc(max(16px, env(safe-area-inset-left, 0px))
 @media (max-height: 430px) { body.wheelctl.touch .dash { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 150px); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); } }
 @media (max-height: 380px) { .wheel { width: 140px; height: 140px; } }
 @media (max-height: 430px) { .cl, .cr { width: 84px; height: 84px; } .cr { left: calc(max(20px, env(safe-area-inset-left, 0px)) + 98px); } .cgas { width: 92px; height: 92px; } .chb { bottom: calc(124px + env(safe-area-inset-bottom, 0px)); width: 72px; height: 72px; } .cnit { bottom: calc(100px + env(safe-area-inset-bottom, 0px)); right: calc(max(20px, env(safe-area-inset-right, 0px)) + 100px); } .cbrk { right: calc(max(20px, env(safe-area-inset-right, 0px)) + 104px); width: 72px; height: 72px; } .pos { font-size: 38px; } #mini { width: 100px; height: 100px; } .logo { font-size: 22px; } .gpanel { max-height: calc(100dvh - 76px); } }
-.overlay { position: absolute; inset: 0; display: grid; place-content: center; background: rgba(8,9,12,.7); direction: rtl; z-index: 20; }
+.overlay { position: absolute; inset: 0; display: grid; place-content: center; background: rgba(8,9,12,.7); z-index: 20; }
 .sbox { width: min(400px, 92vw); background: #14161c; border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 12px; }
 .sbox h2 { margin: 0; font-family: var(--fd); }
 .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; } .seg.two { grid-template-columns: 1fr 1fr; } .seg.three { grid-template-columns: repeat(3, 1fr); }
@@ -287,6 +287,7 @@ body.wheelctl.touch .dash { left: calc(max(16px, env(safe-area-inset-left, 0px))
       <h2>الإعدادات</h2>
       <div>الجودة</div><div class="seg"><button type="button" data-q="auto">تلقائي</button><button type="button" data-q="low">منخفضة</button><button type="button" data-q="medium">متوسطة</button><button type="button" data-q="high">عالية</button></div>
       <div>التوجيه في الجوال</div><div class="seg three"><button type="button" data-ctl="wheel">دركسون</button><button type="button" data-ctl="buttons">أزرار</button><button type="button" data-ctl="tilt">إمالة الجوال</button></div>
+      <div>اللغة</div><div class="seg two"><button type="button" data-lang="ar">العربية</button><button type="button" data-lang="en">English</button></div>
       <label class="check"><input type="checkbox" id="soundOn"> الصوت</label>
       <p class="mdesc">الكمبيوتر: الأسهم أو WASD، Space تفحيط، Shift نيترو، C الكاميرا</p>
       <button class="btn" id="setDone" type="button">تم</button>
@@ -296,6 +297,7 @@ body.wheelctl.touch .dash { left: calc(max(16px, env(safe-area-inset-left, 0px))
 </div>
 
 <script type="module" src="game.js"></script>
-<script>if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));</script>
+<script>if ("serviceWorker" in navigator) { let reloaded = false; navigator.serviceWorker.addEventListener("controllerchange", () => { if (reloaded || !navigator.serviceWorker.controller) return; reloaded = true; if (!document.body.classList.contains("racing")) location.reload(); }); }
+if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((r) => r.update()).catch(() => {}));</script>
 </body>
 </html>

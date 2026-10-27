@@ -1,1 +1,1 @@
-{"headers":[{"source":"/.well-known/assetlinks.json","headers":[{"key":"Content-Type","value":"application/json"}]}]}
+{"headers": [{"source": "/.well-known/assetlinks.json", "headers": [{"key": "Content-Type", "value": "application/json"}]}, {"source": "/(sw.js|index.html|game.js|)", "headers": [{"key": "Cache-Control", "value": "no-cache"}]}]}

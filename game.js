@@ -23,20 +23,25 @@ function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>
 
 // ---------------- renderer ----------------
 const canvas = $("cv");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !IS_TOUCH, powerPreference: "high-performance" });
+// MSAA on every device: smooth, steady edges (phone GPUs do 4x MSAA almost for free)
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-const QUALITY = { low: { pr: 0.75, shadow: 0, draw: 450, hq: false }, medium: { pr: 1, shadow: 1024, draw: 700, hq: false }, high: { pr: 1.75, shadow: 2048, draw: 1000, hq: true } };
+const QUALITY = { low: { pr: 1, shadow: 0, draw: 450, hq: false }, medium: { pr: 1.5, shadow: 1024, draw: 700, hq: false }, high: { pr: 2, shadow: 2048, draw: 1000, hq: true } };
 let Q = QUALITY.medium, basePR = 1;
-// adaptive resolution: if the frame rate drops, render fewer pixels (the HUD stays sharp)
-const ADAPT = { t: 0, n: 0, scale: 1 };
+// adaptive quality: if a phone can't hold the frame rate, step down ONCE in a while and stay there.
+// The old version changed the resolution every second, which made the picture pulse and look unsteady.
+const ADAPT = { t: 0, n: 0, scale: 1, step: 0, calm: 0 };
 function setRes() { renderer.setPixelRatio(basePR * ADAPT.scale); resize(); }
 function adaptRes(dt) {
   if (window.__fast) return; ADAPT.t += dt; ADAPT.n++;
-  if (ADAPT.t < 1.2) return; const fps = ADAPT.n / ADAPT.t; ADAPT.t = 0; ADAPT.n = 0;
-  if (fps < 50 && ADAPT.scale > 0.55) { ADAPT.scale = Math.max(0.55, ADAPT.scale - 0.12); setRes(); }
-  else if (fps > 58.5 && ADAPT.scale < 1) { ADAPT.scale = Math.min(1, ADAPT.scale + 0.05); setRes(); }
+  if (ADAPT.t < 4) return; const fps = ADAPT.n / ADAPT.t; ADAPT.t = 0; ADAPT.n = 0;
+  if (fps >= 48 || ADAPT.step >= 3) return;
+  ADAPT.step++;
+  if (ADAPT.step === 1 && sun.castShadow) { sun.shadow.mapSize.set(512, 512); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+  else if (ADAPT.step === 2) { ADAPT.scale = Math.max(1 / basePR, 0.8); setRes(); }
+  else { ADAPT.scale = Math.max(1 / basePR, 0.67); setRes(); }
 }
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 3000); // a near plane a little further out = steadier depth, no flicker on the car
@@ -394,7 +399,7 @@ function sharedMats() {
   if (CMAT.ready) return CMAT; CMAT.ready = true;
   CMAT.trim = new THREE.MeshStandardMaterial({ color: 0x0b0b0c, roughness: 0.45, metalness: 0.3, side: THREE.DoubleSide });
   CMAT.carbon = new THREE.MeshStandardMaterial({ map: carbonTex(), color: 0x9aa0a8, roughness: 0.32, metalness: 0.4 });
-  CMAT.chrome = new THREE.MeshStandardMaterial({ color: 0xe6e6e6, roughness: 0.1, metalness: 1 });
+  CMAT.chrome = new THREE.MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.25, metalness: 1 });
   CMAT.tire = new THREE.MeshStandardMaterial({ color: 0x171717, roughness: 0.88, side: THREE.DoubleSide, map: tireTex() });
   CMAT.disc = new THREE.MeshStandardMaterial({ color: 0x8a8d92, roughness: 0.35, metalness: 0.85 });
   CMAT.plate = new THREE.MeshStandardMaterial({ map: plateTex(), roughness: 0.5 });
@@ -408,9 +413,9 @@ function grilleTex() { const t = canvasTex(128, 64, (g, w, h) => { g.fillStyle =
 function tireTex() { const t = canvasTex(256, 16, (g, w, h) => { g.fillStyle = "#1a1a1a"; g.fillRect(0, 0, w, h); g.fillStyle = "#0d0d0d"; for (let x = 0; x < w; x += 8) g.fillRect(x, 0, 3, h); }, true); t.repeat.set(1, 1); return t; }
 function plateTex() { return canvasTex(128, 32, (g, w, h) => { g.fillStyle = "#f4f4f0"; g.fillRect(0, 0, w, h); g.strokeStyle = "#111"; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, h - 2); g.fillStyle = "#111"; g.font = "bold 18px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("ملوك ٧٧٧", w / 2, h / 2 + 1); }); }
 function blobTex() { return canvasTex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 4, 32, 32, 32); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); }); }
-const FIN = { gloss: { m: 0.0, r: 0.38, cc: 1, ccr: 0.05 }, metal: { m: 0.32, r: 0.36, cc: 1, ccr: 0.06 }, matte: { m: 0.05, r: 0.8, cc: 0, ccr: 0.6 }, pearl: { m: 0.2, r: 0.32, cc: 1, ccr: 0.05, ir: 1 }, chrome: { m: 0.95, r: 0.1, cc: 1, ccr: 0.03 } };
+const FIN = { gloss: { m: 0.0, r: 0.42, cc: 1, ccr: 0.14 }, metal: { m: 0.3, r: 0.42, cc: 1, ccr: 0.15 }, matte: { m: 0.05, r: 0.82, cc: 0, ccr: 0.6 }, pearl: { m: 0.18, r: 0.38, cc: 1, ccr: 0.14, ir: 1 }, chrome: { m: 0.9, r: 0.22, cc: 1, ccr: 0.12 } };
 function paintMaterial(hq) {
-  return hq ? new THREE.MeshPhysicalMaterial({ color: 0xffffff, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 0.9 }) : new THREE.MeshStandardMaterial({ color: 0xffffff, envMapIntensity: 0.75 });
+  return hq ? new THREE.MeshPhysicalMaterial({ color: 0xffffff, clearcoat: 1, clearcoatRoughness: 0.14, envMapIntensity: 0.9 }) : new THREE.MeshStandardMaterial({ color: 0xffffff, envMapIntensity: 0.75 });
 }
 function applyFinish(m, f) {
   const F = FIN[f] || FIN.metal; m.metalness = F.m; m.roughness = F.r;
@@ -424,7 +429,7 @@ function drawPaint(cv, look, L, B) {
   // subtle panel gaps: doors, bonnet and boot lid — they make the body read as a real car
   if (B) {
     const U = (x) => (x + L / 2) / L * W, Yp = (phi) => (1 - phi) * H, C = B.cab;
-    g.strokeStyle = "rgba(0,0,0,0.5)"; g.lineWidth = 2;
+    g.strokeStyle = "rgba(0,0,0,0.28)"; g.lineWidth = 4; g.lineCap = "round";
     const vline = (x, p0, p1) => { for (const [a, b] of [[p0, p1], [1 - p1, 1 - p0]]) { g.beginPath(); g.moveTo(U(x), Yp(a)); g.lineTo(U(x), Yp(b)); g.stroke(); } };
     const hline = (x0, x1, p) => { for (const q of [p, 1 - p]) { g.beginPath(); g.moveTo(U(x0), Yp(q)); g.lineTo(U(x1), Yp(q)); g.stroke(); } };
     const dF = C.x0 - 0.12, dB = C.b != null ? C.b - 0.02 : C.x2 + 0.15;
@@ -452,13 +457,13 @@ function makeCarMesh(c, look, hq, lo) {
   const G = carGeos(c, lo), M = sharedMats(), B = c.B;
   const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
   const paintCv = document.createElement("canvas"); paintCv.width = 1024; paintCv.height = 512;
-  const paintTex = new THREE.CanvasTexture(paintCv); paintTex.colorSpace = THREE.SRGBColorSpace; paintTex.anisotropy = 4;
+  const paintTex = new THREE.CanvasTexture(paintCv); paintTex.colorSpace = THREE.SRGBColorSpace; paintTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   const paintMat = paintMaterial(hq); paintMat.map = paintTex;
   const roofMat = paintMaterial(hq);
-  const glassMat = new (hq ? THREE.MeshPhysicalMaterial : THREE.MeshStandardMaterial)({ color: 0x141b22, roughness: 0.03, metalness: 0.1, envMapIntensity: 1.8 }); if (hq) glassMat.clearcoat = 1;
+  const glassMat = new (hq ? THREE.MeshPhysicalMaterial : THREE.MeshStandardMaterial)({ color: 0x141b22, roughness: 0.1, metalness: 0.1, envMapIntensity: 1.4 }); if (hq) glassMat.clearcoat = 1;
   const rimMat = new THREE.MeshStandardMaterial({ color: look.rimC, metalness: 0.85, roughness: 0.25, side: THREE.DoubleSide });
   const calMat = new THREE.MeshStandardMaterial({ color: look.caliper, roughness: 0.4, metalness: 0.2 });
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xb9c4cf, emissive: 0xfff3dd, emissiveIntensity: 0.18, roughness: 0.06, metalness: 1 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xc9d2da, emissive: 0xfff3dd, emissiveIntensity: 0.18, roughness: 0.25, metalness: 0.6 });
   const tailMat = new THREE.MeshStandardMaterial({ color: 0x5a0000, emissive: 0xff1414, emissiveIntensity: 0.8, roughness: 0.2 });
   const add = (geo, mat, cast = true, layer = 0) => { if (!geo) return null; const m = new THREE.Mesh(geo, layer ? onTop(mat, layer) : mat); m.castShadow = cast; m.receiveShadow = false; m.renderOrder = layer; body.add(m); return m; };
   add(G.paint, paintMat); add(G.glass, glassMat); const roof = add(G.roof, roofMat, !lo, 2); add(G.trim, M.trim, !lo, 2); add(G.carbon, M.carbon, !lo, 2); add(G.chrome, M.chrome, false, 2);
@@ -567,7 +572,7 @@ function buildTrack(def, world) {
   // start line and gantry
   const p0 = P[0], n0 = Nl[0], a0 = Math.atan2(T[0].z, T[0].x);
   const line = new THREE.Mesh(new THREE.PlaneGeometry(3, hw * 2), new THREE.MeshStandardMaterial({ map: TEX.checker, roughness: 0.8 }));
-  line.rotation.x = -Math.PI / 2; line.rotation.z = -a0; line.position.set(p0.x, 0.03, p0.z); line.receiveShadow = true; world.add(line);
+  line.material.polygonOffset = true; line.material.polygonOffsetFactor = -4; line.material.polygonOffsetUnits = -8; line.rotation.x = -Math.PI / 2; line.rotation.z = -a0; line.position.set(p0.x, 0.03, p0.z); line.receiveShadow = true; world.add(line);
   for (const s of [1, -1]) add("pillar", boxAt(0.8, 7, 0.8, 0, 3.5, 0).rotateY(-a0).translate(p0.x + n0.x * s * (wallOff + 0.4), 0, p0.z + n0.z * s * (wallOff + 0.4)));
   const bMat = new THREE.MeshStandardMaterial({ map: TEX.banner, emissive: def.night ? 0xffffff : 0x000000, emissiveMap: def.night ? TEX.banner : null, emissiveIntensity: 0.7 });
   for (const dir of [-1, 1]) { const b = new THREE.Mesh(new THREE.PlaneGeometry(wallOff * 2 + 1.6, 1.6), bMat); b.position.set(p0.x + T[0].x * dir * 0.3, 6.6, p0.z + T[0].z * dir * 0.3); b.lookAt(p0.x + T[0].x * dir * 20, 6.6, p0.z + T[0].z * dir * 20); world.add(b); }
@@ -578,7 +583,9 @@ function buildTrack(def, world) {
     wall: { map: def.night ? TEX.wallN : TEX.wallD, roughness: 0.8, side: THREE.DoubleSide, emissive: def.night ? 0xffffff : 0, emissiveMap: def.night ? TEX.wallN : null, emissiveIntensity: def.night ? 0.25 : 0 },
     wallTop: { color: def.night ? 0x33ccff : 0xeeeeee, emissive: def.night ? 0x22aaff : 0, emissiveIntensity: 1 }, pillar: { color: 0x2a2d33, roughness: 0.5, metalness: 0.6 }
   };
-  for (const k in G) { const m = new THREE.Mesh(mergeAll(G[k]), new THREE.MeshStandardMaterial(MATS[k])); m.receiveShadow = true; m.castShadow = k === "wall" || k === "pillar"; world.add(m); }
+  // road layers lie a few cm apart; a depth offset keeps them from flickering into each other far away
+  const LAYER = { shoulder: 1, road: 2, kerb: 3 };
+  for (const k in G) { const mat = new THREE.MeshStandardMaterial(MATS[k]); if (LAYER[k]) { mat.polygonOffset = true; mat.polygonOffsetFactor = -LAYER[k]; mat.polygonOffsetUnits = -LAYER[k] * 2; } const m = new THREE.Mesh(mergeAll(G[k]), mat); m.receiveShadow = true; m.castShadow = k === "wall" || k === "pillar"; m.renderOrder = LAYER[k] || 0; world.add(m); }
   scenery(def, world);
   return TR;
 }
@@ -1090,6 +1097,9 @@ function frameTick(dt) {
 // ---------------- camera ----------------
 let camA = 0;
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
+const _sunOff = new THREE.Vector3(40, 90, 30), _sv = new THREE.Vector3();
+const _sunView = new THREE.Matrix4().lookAt(_sunOff, new THREE.Vector3(), new THREE.Vector3(0, 1, 0)).invert(), _sunViewInv = _sunView.clone().invert();
+_sunView.setPosition(0, 0, 0); _sunViewInv.setPosition(0, 0, 0);
 function updateCamera(dt) {
   const c = { x: me.rx, z: me.rz, a: me.ra, vx: me.vx, vz: me.vz, nitroOn: me.nitroOn, nitro: me.nitro }, sp = Math.hypot(c.vx, c.vz);
   // follow a mix of where the car points and where it is going, so drifts look wide
@@ -1111,7 +1121,9 @@ function updateCamera(dt) {
   camera.lookAt(camLook);
   const boost = c.nitroOn && c.nitro > 0;
   camera.fov = lerp(camera.fov, 55 + Math.min(8, sp * 0.14) + (boost ? 6 : 0), 1 - Math.exp(-dt * 4)); camera.updateProjectionMatrix();
-  sun.position.set(c.x + 40, 90, c.z + 30); sun.target.position.set(c.x, 0, c.z);
+  // the shadow camera follows the car in whole shadow-texel steps, so shadow edges don't crawl or shimmer
+  { const tex = (sc.right - sc.left) / sun.shadow.mapSize.x; _sv.set(c.x, 0, c.z).applyMatrix4(_sunView); _sv.x = Math.round(_sv.x / tex) * tex; _sv.y = Math.round(_sv.y / tex) * tex; _sv.applyMatrix4(_sunViewInv);
+    sun.target.position.copy(_sv); sun.position.copy(_sv).add(_sunOff); }
   headLight.position.set(c.x + Math.cos(c.a) * 1.5, 1.2, c.z + Math.sin(c.a) * 1.5); headLight.target.position.set(c.x + Math.cos(c.a) * 30, 0, c.z + Math.sin(c.a) * 30);
 }
 function syncMeshes(dt, al) {

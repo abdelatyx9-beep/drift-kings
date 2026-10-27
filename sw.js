@@ -1,6 +1,6 @@
 // يخلي اللعبة تشتغل بدون إنترنت بعد أول فتح
 // لما تعدّل اللعبة، غيّر رقم النسخة هنا عشان الجوالات تاخذ التحديث
-const VERSION = "dk-v6";
+const VERSION = "dk-v7";
 const BASE = self.registration.scope;               // يشتغل على Vercel و GitHub Pages
 const u = (p) => new URL(p, BASE).href;
 const CORE = ["", "index.html", "game.js", "manifest.webmanifest", "vendor/three.module.min.js", "vendor/jsm/utils/BufferGeometryUtils.js", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"].map(u);

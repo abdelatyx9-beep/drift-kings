@@ -1490,7 +1490,7 @@ function chalBadge() { const n = chalReady(), b = $("chalBadge"); if (b) { b.hid
 // ---- leaderboard (Supabase REST, no library) ----
 const LB = { last: null };
 async function sb(path, body) {
-  const res = await fetch(SB.url + "/rest/v1/" + path, { method: body ? "POST" : "GET", headers: { apikey: SB.key, Authorization: "Bearer " + SB.key, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(SB.url + "/rest/v1/" + path, { method: body ? "POST" : "GET", headers: Object.assign({ apikey: SB.key, "Content-Type": "application/json" }, SB.key.startsWith("eyJ") ? { Authorization: "Bearer " + SB.key } : {}), body: body ? JSON.stringify(body) : undefined });
   if (!res.ok) throw new Error("sb " + res.status);
   return res.status === 204 ? null : res.json();
 }
